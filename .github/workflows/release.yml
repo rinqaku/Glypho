@@ -82,6 +82,9 @@ jobs:
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: '24'
+      - name: Install manylinux build dependencies
+        shell: bash
+        run: dnf -y install openssl-devel
       - name: Build portable native runtime
         shell: bash
         run: |
@@ -113,7 +116,9 @@ jobs:
         run: /opt/python/cp310-cp310/bin/python .github/tools/package_native.py '${{ matrix.platform }}' --target target/release
       - name: Pack npm platform package
         shell: bash
-        run: npm pack --pack-destination ../../release
+        run: |
+          mkdir -p ../../release
+          npm pack --pack-destination ../../release
         working-directory: npm/${{ matrix.platform }}
       - name: Smoke-test packed Node.js SDK
         shell: bash
@@ -186,7 +191,9 @@ jobs:
             --parallel \
             --skip_tests \
             --use_coreml \
-            --cmake_extra_defines CMAKE_OSX_DEPLOYMENT_TARGET=14.0
+            --cmake_extra_defines \
+              CMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
+              CMAKE_POLICY_VERSION_MINIMUM=3.5
           echo "ORT_LIB_LOCATION=$RUNNER_TEMP/onnxruntime/Release" >> "$GITHUB_ENV"
           echo 'ORT_LIB_PROFILE=Release' >> "$GITHUB_ENV"
       - name: Build native runtime
@@ -209,7 +216,9 @@ jobs:
         run: python .github/tools/package_native.py '${{ matrix.platform }}' --target target/release
       - name: Pack npm platform package
         shell: bash
-        run: npm pack --pack-destination ../../release
+        run: |
+          mkdir -p ../../release
+          npm pack --pack-destination ../../release
         working-directory: npm/${{ matrix.platform }}
       - name: Smoke-test packed Node.js SDK
         shell: bash
