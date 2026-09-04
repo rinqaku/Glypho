@@ -4,8 +4,11 @@ set -euo pipefail
 TARGET="${1:?usage: smoke_npm.sh <platform> <package-dir>}"
 PACKAGE_DIR="${2:?usage: smoke_npm.sh <platform> <package-dir>}"
 ROOT="${GITHUB_WORKSPACE:-$(pwd)}"
+if command -v cygpath >/dev/null 2>&1; then
+  ROOT="$(cygpath -u "$ROOT")"
+fi
 PACKAGE_DIR="$(cd "$PACKAGE_DIR" && pwd)"
-VERSION="$(node -p "require('$ROOT/js/package.json').version")"
+VERSION="$(cd "$ROOT/js" && node -p "require('./package.json').version")"
 PLATFORM_PACKAGE="$PACKAGE_DIR/glypho-ocr-$TARGET-$VERSION.tgz"
 
 if [[ ! -f "$PLATFORM_PACKAGE" ]]; then

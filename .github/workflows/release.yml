@@ -90,8 +90,22 @@ jobs:
         run: |
           stdcpp=$(dirname "$(gcc -print-file-name=libstdc++.a)")
           test -f "$stdcpp/libstdc++.a"
+
+          # ort 2.0.0-rc.13's downloaded Linux archives are built against a
+          # newer glibc than our manylinux_2_28 baseline. Provide conservative
+          # local shims for the four newer symbols they reference so the final
+          # artifacts keep the truthful glibc 2.28 compatibility floor.
+          cat > "$RUNNER_TEMP/glypho_glibc_compat.c" <<'C'
+          #include <stdlib.h>
+          __attribute__((visibility("hidden"))) char __libc_single_threaded = 0;
+          __attribute__((visibility("hidden"))) long __isoc23_strtol(const char *s, char **end, int base) { return strtol(s, end, base); }
+          __attribute__((visibility("hidden"))) long long __isoc23_strtoll(const char *s, char **end, int base) { return strtoll(s, end, base); }
+          __attribute__((visibility("hidden"))) unsigned long long __isoc23_strtoull(const char *s, char **end, int base) { return strtoull(s, end, base); }
+          C
+          cc -fPIC -c "$RUNNER_TEMP/glypho_glibc_compat.c" -o "$RUNNER_TEMP/glypho_glibc_compat.o"
+
           export ORT_CXX_STDLIB='static=stdc++'
-          export RUSTFLAGS="$RUSTFLAGS -L native=$stdcpp"
+          export RUSTFLAGS="$RUSTFLAGS -L native=$stdcpp -C link-arg=$RUNNER_TEMP/glypho_glibc_compat.o"
           args=(--release --locked -p glypho-ocr)
           if [[ -n '${{ matrix.features }}' ]]; then args+=(--features '${{ matrix.features }}'); fi
           cargo build "${args[@]}"
@@ -161,7 +175,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       CARGO_HOME: ${{ github.workspace }}/.gh-tmp/cargo-home
-      MACOSX_DEPLOYMENT_TARGET: ${{ startsWith(matrix.platform, 'darwin') && '14.0' || '' }}
+      MACOSX_DEPLOYMENT_TARGET: ${{ matrix.platform == 'darwin-x64' && '15.0' || startsWith(matrix.platform, 'darwin') && '14.0' || '' }}
       RUSTFLAGS: --remap-path-prefix=${{ github.workspace }}=/workspace --remap-path-prefix=${{ github.workspace }}/.gh-tmp=/tmp
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -192,7 +206,7 @@ jobs:
             --skip_tests \
             --use_coreml \
             --cmake_extra_defines \
-              CMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
+              CMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
               CMAKE_POLICY_VERSION_MINIMUM=3.5
           echo "ORT_LIB_LOCATION=$RUNNER_TEMP/onnxruntime/Release" >> "$GITHUB_ENV"
           echo 'ORT_LIB_PROFILE=Release' >> "$GITHUB_ENV"
