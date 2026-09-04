@@ -234,6 +234,8 @@ jobs:
           python -m build --wheel python
           python -m pip install --force-reinstall --no-deps python/dist/*.whl
           python -c "from glypho import Glypho; g = Glypho(languages=('en',)); d = g.recognize('.github/fixtures/english.png'); assert d.text == 'The quick brown fox jumps over 13 lazy dogs.'; print(g.info())"
+          mkdir -p release
+          cp python/dist/*.whl release/
       - name: Stage npm platform package
         shell: bash
         run: python .github/tools/package_native.py '${{ matrix.platform }}' --target target/release
@@ -269,9 +271,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: glypho-${{ matrix.platform }}
-          path: |
-            python/dist/*.whl
-            release/*
+          path: release/*
 
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
