@@ -1,0 +1,167 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://glypho.dev/schemas/annotation.v1.schema.json",
+  "title": "Glypho OCR annotation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "coordinate_system", "image", "text", "lines", "language_hints", "metadata"],
+  "properties": {
+    "schema_version": { "const": "glypho.annotation.v1" },
+    "coordinate_system": { "const": "pixel_top_left" },
+    "image": { "$ref": "#/$defs/image" },
+    "text": { "type": "string" },
+    "corrected_text": { "type": "string" },
+    "lines": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/line" }
+    },
+    "language_hints": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "metadata": { "$ref": "#/$defs/metadata" }
+  },
+  "$defs": {
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "file_name", "width", "height"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "file_name": { "type": "string", "minLength": 1 },
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "point": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y"],
+      "properties": {
+        "x": { "type": "number", "minimum": 0 },
+        "y": { "type": "number", "minimum": 0 }
+      }
+    },
+    "quad": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["points"],
+      "properties": {
+        "points": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": { "$ref": "#/$defs/point" }
+        }
+      }
+    },
+    "word": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "quad", "text"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "quad": { "$ref": "#/$defs/quad" },
+        "text": { "type": "string" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "line": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "order",
+        "quad",
+        "text",
+        "direction",
+        "legibility",
+        "evaluation",
+        "source",
+        "words",
+        "ignored"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "order": { "type": "integer", "minimum": 0 },
+        "quad": { "$ref": "#/$defs/quad" },
+        "text": { "type": "string" },
+        "corrected_text": { "type": "string" },
+        "alternatives": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["text", "confidence"],
+            "properties": {
+              "text": { "type": "string" },
+              "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+            }
+          }
+        },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "language": { "type": "string", "minLength": 1 },
+        "script": { "type": "string", "minLength": 1 },
+        "direction": {
+          "enum": ["auto", "left_to_right", "right_to_left", "vertical"]
+        },
+        "legibility": { "enum": ["clear", "ambiguous", "unreadable"] },
+        "flags": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "evaluation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["detection", "recognition"],
+          "properties": {
+            "detection": { "type": "boolean" },
+            "recognition": { "type": "boolean" }
+          }
+        },
+        "source": { "enum": ["manual", "model", "imported"] },
+        "words": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/word" }
+        },
+        "ignored": { "type": "boolean" }
+      }
+    },
+    "engine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "backend", "languages", "elapsed_ms"],
+      "properties": {
+        "name": { "type": "string" },
+        "version": { "type": "string" },
+        "backend": { "type": "string" },
+        "model": { "type": "string" },
+        "languages": { "type": "array", "items": { "type": "string" } },
+        "elapsed_ms": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": { "enum": ["draft", "reviewed", "verified"] },
+        "annotator": { "type": "string" },
+        "created_at": { "type": "string" },
+        "updated_at": { "type": "string" },
+        "engine": { "$ref": "#/$defs/engine" },
+        "notes": { "type": "string" },
+        "sensitive": { "type": "boolean" },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "group_id": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

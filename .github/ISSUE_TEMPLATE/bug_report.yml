@@ -1,0 +1,48 @@
+name: Bug report
+description: Report a reproducible Glypho defect
+title: '[Bug] '
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not attach private benchmark images, credentials, payment data, or other sensitive content.
+  - type: input
+    id: version
+    attributes:
+      label: Glypho version
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: interface
+    attributes:
+      label: Interface
+      options: [CLI, Rust, Python, Node.js, Glypho Web]
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform and device
+      placeholder: Ubuntu 24.04 x86_64, device=cuda
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Include commands or code and sanitized input characteristics.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: info
+    attributes:
+      label: Runtime information
+      description: Paste sanitized output from `glypho info --pretty` or `Glypho.info()`.
+

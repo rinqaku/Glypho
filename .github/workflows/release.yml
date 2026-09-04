@@ -1,0 +1,290 @@
+name: Release packages
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      CARGO_HOME: ${{ runner.temp }}/cargo-home
+      RUSTFLAGS: --remap-path-prefix=${{ github.workspace }}=/workspace --remap-path-prefix=${{ runner.temp }}=/tmp
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          components: clippy, rustfmt
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14'
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: python .github/tools/check_versions.py
+      - run: python .github/tools/check_model_registry.py
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      - run: cargo check --locked -p glypho-ocr --features openvino
+      - run: cargo build --release --locked -p glypho-ocr
+      - run: python -m pip install numpy pillow pytest
+      - run: PYTHONPATH=python python -m pytest python/tests
+      - run: npm test
+        working-directory: js
+      - run: npm ci --ignore-scripts
+        working-directory: web
+      - run: npm audit --audit-level=high
+        working-directory: web
+      - run: npm test
+        working-directory: web
+      - run: npm run build
+        working-directory: web
+      - run: docker build --tag glypho-web:release web
+
+  linux:
+    needs: verify
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            image: quay.io/pypa/manylinux_2_28_x86_64@sha256:0536c364004fa2a3c5041120b6fe35d84fc5bfe31f04c6a6304f13eac4a67b63
+            platform: linux-x64
+            wheel-platform: manylinux_2_28_x86_64
+            features: cuda
+          - os: ubuntu-24.04-arm
+            image: quay.io/pypa/manylinux_2_28_aarch64@sha256:1676a4f178dc6cf8a1d1e3b7e1d71fca891a466ebde72a33880ccda8af3383d8
+            platform: linux-arm64
+            wheel-platform: manylinux_2_28_aarch64
+            features: ''
+    runs-on: ${{ matrix.os }}
+    env:
+      CARGO_HOME: ${{ runner.temp }}/cargo-home
+      RUSTFLAGS: --remap-path-prefix=${{ github.workspace }}=/workspace --remap-path-prefix=${{ runner.temp }}=/tmp
+    container:
+      image: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '24'
+      - name: Build portable native runtime
+        shell: bash
+        run: |
+          stdcpp=$(dirname "$(gcc -print-file-name=libstdc++.a)")
+          test -f "$stdcpp/libstdc++.a"
+          export ORT_CXX_STDLIB='static=stdc++'
+          export RUSTFLAGS="$RUSTFLAGS -L native=$stdcpp"
+          args=(--release --locked -p glypho-ocr)
+          if [[ -n '${{ matrix.features }}' ]]; then args+=(--features '${{ matrix.features }}'); fi
+          cargo build "${args[@]}"
+      - name: Build and repair Python wheel
+        shell: bash
+        env:
+          GLYPHO_SKIP_NATIVE_BUILD: '1'
+        run: |
+          python=/opt/python/cp310-cp310/bin/python
+          "$python" -m pip install build==1.3.0 auditwheel==6.8.2
+          "$python" -m build --wheel python
+          "$python" -m auditwheel repair python/dist/*.whl --plat '${{ matrix.wheel-platform }}' --wheel-dir release
+          "$python" -m auditwheel show release/*.whl
+          "$python" -m pip install --force-reinstall --no-deps release/*.whl
+          GLYPHO_HOME="$RUNNER_TEMP/glypho" "$python" -c "from glypho import Glypho; g = Glypho(languages=('en',)); d = g.recognize('.github/fixtures/english.png'); assert d.text == 'The quick brown fox jumps over 13 lazy dogs.'; print(g.info())"
+      - name: Build Python source distribution
+        if: matrix.platform == 'linux-x64'
+        shell: bash
+        run: /opt/python/cp310-cp310/bin/python -m build --sdist python --outdir release
+      - name: Stage npm platform package
+        shell: bash
+        run: /opt/python/cp310-cp310/bin/python .github/tools/package_native.py '${{ matrix.platform }}' --target target/release
+      - name: Pack npm platform package
+        shell: bash
+        run: npm pack --pack-destination ../../release
+        working-directory: npm/${{ matrix.platform }}
+      - name: Create CLI archive
+        shell: bash
+        run: /opt/python/cp310-cp310/bin/python .github/tools/package_native.py '${{ matrix.platform }}' --target target/release --archive release
+      - name: Test CLI installer
+        shell: bash
+        run: |
+          GLYPHO_ASSET_DIR="$GITHUB_WORKSPACE/release" \
+          GLYPHO_INSTALL_DIR="$RUNNER_TEMP/glypho-bin" \
+          ./install.sh
+          GLYPHO_HOME="$RUNNER_TEMP/glypho" \
+          "$RUNNER_TEMP/glypho-bin/glypho" .github/fixtures/english.png --offline --language en
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: glypho-${{ matrix.platform }}
+          path: release/*
+
+  native:
+    needs: verify
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15-intel
+            platform: darwin-x64
+            features: coreml
+          - os: macos-15
+            platform: darwin-arm64
+            features: coreml
+          - os: windows-2025
+            platform: win32-x64
+            features: cuda
+          - os: windows-11-arm
+            platform: win32-arm64
+            features: ''
+    runs-on: ${{ matrix.os }}
+    env:
+      CARGO_HOME: ${{ runner.temp }}/cargo-home
+      MACOSX_DEPLOYMENT_TARGET: ${{ startsWith(matrix.platform, 'darwin') && '14.0' || '' }}
+      RUSTFLAGS: --remap-path-prefix=${{ github.workspace }}=/workspace --remap-path-prefix=${{ runner.temp }}=/tmp
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Check out ONNX Runtime for Intel macOS
+        if: matrix.platform == 'darwin-x64'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: microsoft/onnxruntime
+          ref: v1.28.0
+          path: .onnxruntime
+          submodules: recursive
+          fetch-depth: 1
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14'
+      - name: Build ONNX Runtime for Intel macOS
+        if: matrix.platform == 'darwin-x64'
+        shell: bash
+        run: |
+          .onnxruntime/build.sh \
+            --build_dir "$RUNNER_TEMP/onnxruntime" \
+            --config Release \
+            --parallel \
+            --skip_tests \
+            --use_coreml \
+            --cmake_extra_defines CMAKE_OSX_DEPLOYMENT_TARGET=14.0
+          echo "ORT_LIB_LOCATION=$RUNNER_TEMP/onnxruntime/Release" >> "$GITHUB_ENV"
+          echo 'ORT_LIB_PROFILE=Release' >> "$GITHUB_ENV"
+      - name: Build native runtime
+        shell: bash
+        run: |
+          args=(--release --locked -p glypho-ocr)
+          if [[ -n '${{ matrix.features }}' ]]; then args+=(--features '${{ matrix.features }}'); fi
+          cargo build "${args[@]}"
+      - name: Build Python wheel
+        shell: bash
+        env:
+          GLYPHO_SKIP_NATIVE_BUILD: '1'
+        run: |
+          python -m pip install build
+          python -m build --wheel python
+          python -m pip install --force-reinstall --no-deps python/dist/*.whl
+          python -c "from glypho import Glypho; g = Glypho(languages=('en',)); d = g.recognize('.github/fixtures/english.png'); assert d.text == 'The quick brown fox jumps over 13 lazy dogs.'; print(g.info())"
+      - name: Stage npm platform package
+        shell: bash
+        run: python .github/tools/package_native.py '${{ matrix.platform }}' --target target/release
+      - name: Pack npm platform package
+        shell: bash
+        run: npm pack --pack-destination ../../release
+        working-directory: npm/${{ matrix.platform }}
+      - name: Create CLI archive
+        shell: bash
+        run: python .github/tools/package_native.py '${{ matrix.platform }}' --target target/release --archive release
+      - name: Test macOS CLI installer
+        if: startsWith(matrix.platform, 'darwin')
+        shell: bash
+        run: |
+          GLYPHO_ASSET_DIR="$GITHUB_WORKSPACE/release" \
+          GLYPHO_INSTALL_DIR="$RUNNER_TEMP/glypho-bin" \
+          ./install.sh
+          "$RUNNER_TEMP/glypho-bin/glypho" .github/fixtures/english.png --offline --language en
+      - name: Test Windows CLI installer
+        if: startsWith(matrix.platform, 'win32')
+        shell: pwsh
+        run: |
+          $env:GLYPHO_ASSET_DIR = "$env:GITHUB_WORKSPACE\release"
+          $env:GLYPHO_INSTALL_DIR = "$env:RUNNER_TEMP\glypho-bin"
+          $env:GLYPHO_SKIP_PATH_UPDATE = '1'
+          .\install.ps1
+          & "$env:RUNNER_TEMP\glypho-bin\glypho.exe" .github/fixtures/english.png --offline --language en
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: glypho-${{ matrix.platform }}
+          path: |
+            python/dist/*.whl
+            release/*
+
+  publish:
+    needs: [linux, native]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: glypho-*
+          path: artifacts
+          merge-multiple: true
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14'
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+      - name: Create release checksums
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          cd artifacts
+          sha256sum * > SHA256SUMS
+      - name: Publish wheels to PyPI
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          python -m pip install twine
+          python -m twine check artifacts/*.whl artifacts/glypho_ocr-*.tar.gz
+          python -m twine upload artifacts/*.whl artifacts/glypho_ocr-*.tar.gz
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+      - name: Publish npm native packages
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: for package in artifacts/glypho-ocr-*.tgz; do npm publish "$package" --access public --provenance; done
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish npm wrapper
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: js
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish Cargo crate
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: cargo publish -p glypho-ocr --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          files: artifacts/*

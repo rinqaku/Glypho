@@ -1,0 +1,122 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          components: clippy, rustfmt
+      - run: cargo fmt --all -- --check
+      - run: python3 .github/tools/check_model_registry.py
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      - run: cargo check --locked -p glypho-ocr --features openvino
+
+  bindings:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CARGO_HOME: ${{ runner.temp }}/cargo-home
+      RUSTFLAGS: --remap-path-prefix=${{ github.workspace }}=/workspace --remap-path-prefix=${{ runner.temp }}=/tmp
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14'
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: cargo build --release --locked -p glypho-ocr
+      - run: python -m pip install numpy pillow pytest
+      - run: PYTHONPATH=python python -m pytest python/tests
+      - working-directory: js
+        run: npm test
+      - working-directory: web
+        run: npm ci --ignore-scripts
+      - working-directory: web
+        run: npm audit --audit-level=high
+      - working-directory: web
+        run: npm test
+      - working-directory: web
+        run: npm run build
+      - run: docker build --tag glypho-web:ci web
+      - name: Test hardened Web container
+        shell: bash
+        run: |
+          container=$(docker run --detach --read-only --tmpfs /tmp:size=16m,noexec,nosuid,nodev --cap-drop ALL --security-opt no-new-privileges --publish 127.0.0.1:8080:8080 glypho-web:ci)
+          trap 'docker rm --force "$container"' EXIT
+          for attempt in {1..20}; do
+            curl --fail --silent http://127.0.0.1:8080/healthz && break
+            sleep 1
+          done
+          curl --fail --silent --head http://127.0.0.1:8080/ | grep -qi '^Content-Security-Policy:'
+          curl --fail --silent --head http://127.0.0.1:8080/ | grep -qi '^Cross-Origin-Embedder-Policy: require-corp'
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' --request POST http://127.0.0.1:8080/)" = 405
+
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CARGO_HOME: ${{ runner.temp }}/cargo-home
+      RUSTFLAGS: --remap-path-prefix=${{ github.workspace }}=/workspace --remap-path-prefix=${{ runner.temp }}=/tmp
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14'
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '24'
+      - run: python .github/tools/check_versions.py
+      - run: python .github/tools/check_model_registry.py
+      - run: cargo build --release --locked -p glypho-ocr
+      - run: python -m pip install build twine
+      - run: python -m build --wheel --sdist python
+        env:
+          GLYPHO_SKIP_NATIVE_BUILD: '1'
+      - run: python -m twine check python/dist/*
+      - run: CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" python -m pip wheel --no-deps --wheel-dir /tmp/glypho-sdist-wheel python/dist/*.tar.gz
+      - run: python -m venv /tmp/glypho-wheel
+      - run: /tmp/glypho-wheel/bin/pip install --no-index python/dist/*.whl
+      - run: /tmp/glypho-wheel/bin/glypho --version
+      - run: GLYPHO_HOME=/tmp/glypho-package /tmp/glypho-wheel/bin/glypho .github/fixtures/english.png --language en
+      - run: cargo package -p glypho-ocr --locked
+      - run: python .github/tools/package_native.py linux-x64 --target target/release --archive release
+      - run: sha256sum --check glypho-ocr-linux-x64.tar.gz.sha256
+        working-directory: release
+      - run: GLYPHO_ASSET_DIR="$GITHUB_WORKSPACE/release" GLYPHO_INSTALL_DIR=/tmp/glypho-installer ./install.sh
+      - run: GLYPHO_HOME=/tmp/glypho-package /tmp/glypho-installer/glypho .github/fixtures/english.png --offline --language en
+      - run: npm pack --pack-destination ../../release
+        working-directory: npm/linux-x64
+      - run: test -x js/src/cli.js
+      - working-directory: js
+        run: npm pack --dry-run
+      - run: mkdir -p /tmp/glypho-npm
+      - run: npm pack --pack-destination /tmp/glypho-npm
+        working-directory: js
+      - run: npm init -y
+        working-directory: /tmp/glypho-npm
+      - run: npm install --offline ./glypho-ocr-*.tgz $GITHUB_WORKSPACE/release/glypho-ocr-linux-x64-*.tgz
+        working-directory: /tmp/glypho-npm
+      - run: node --input-type=module -e "import { resolveBinary } from 'glypho-ocr'; console.log(resolveBinary())"
+        working-directory: /tmp/glypho-npm
+      - run: GLYPHO_HOME=/tmp/glypho-package ./node_modules/.bin/glypho "$GITHUB_WORKSPACE/.github/fixtures/english.png" --offline --language en
+        working-directory: /tmp/glypho-npm

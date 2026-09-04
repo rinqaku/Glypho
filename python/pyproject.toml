@@ -1,0 +1,38 @@
+[build-system]
+requires = ['setuptools>=77', 'wheel>=0.45']
+build-backend = 'setuptools.build_meta'
+
+[project]
+name = 'glypho-ocr'
+version = '0.1.0'
+description = 'Python bindings for Glypho OCR'
+readme = 'README.md'
+requires-python = '>=3.10'
+license = 'Apache-2.0'
+license-files = ['LICENSE']
+keywords = ['ocr', 'onnx', 'computer-vision', 'text-recognition']
+classifiers = [
+    'Development Status :: 3 - Alpha',
+    'Operating System :: MacOS',
+    'Operating System :: Microsoft :: Windows',
+    'Operating System :: POSIX :: Linux',
+    'Programming Language :: Python :: 3',
+    'Programming Language :: Rust',
+    'Topic :: Multimedia :: Graphics :: Capture :: Scanners',
+]
+
+[project.urls]
+Homepage = 'https://github.com/rinqaku/Glypho'
+Repository = 'https://github.com/rinqaku/Glypho'
+Issues = 'https://github.com/rinqaku/Glypho/issues'
+Changelog = 'https://github.com/rinqaku/Glypho/blob/main/CHANGELOG.md'
+
+[project.scripts]
+glypho = 'glypho.cli:main'
+
+[tool.setuptools]
+packages = ['glypho']
+include-package-data = true
+
+[tool.setuptools.package-data]
+glypho = ['_libs/*', '_bin/*']

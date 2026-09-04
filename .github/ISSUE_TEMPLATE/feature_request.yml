@@ -1,0 +1,24 @@
+name: Feature request
+description: Propose a focused improvement to Glypho
+title: '[Feature] '
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe the OCR workflow or limitation, not only the proposed implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Devices, languages, and constraints
+      description: Include latency, memory, privacy, and compatibility requirements when relevant.
+
