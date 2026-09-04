@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM node:24.17.0-alpine3.24@sha256:156b55f92e98ccd5ef49578a8cea0df4679826564bad1c9d4ef04462b9f0ded6 AS build
+FROM node:26.8.1-alpine3.24@sha256:2d984a15c9b54fd0aeb608b8e0d0d83529eb34d2966db27a1fb4f1edc3d298a3 AS build
 
 WORKDIR /app
 COPY package.json package-lock.json ./
