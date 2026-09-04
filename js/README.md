@@ -31,10 +31,10 @@ Prebuilt runtime packages are available for:
 | OS | Architectures |
 | --- | --- |
 | Linux | x64, ARM64 |
-| macOS | x64, Apple Silicon |
+| macOS | Apple Silicon (ARM64) |
 | Windows | x64, ARM64 |
 
-npm selects the matching `glypho-ocr-<os>-<arch>` package automatically.
+npm selects the matching `glypho-ocr-<os>-<arch>` package automatically. Intel macOS is not included in the `0.1.0` prebuilt package matrix.
 
 ## 🚀 Quick start
 
