@@ -20,7 +20,7 @@ jobs:
       CARGO_HOME: ${{ github.workspace }}/.gh-tmp/cargo-home
       RUSTFLAGS: --remap-path-prefix=${{ github.workspace }}=/workspace --remap-path-prefix=${{ github.workspace }}/.gh-tmp=/tmp
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           components: clippy, rustfmt
@@ -77,7 +77,7 @@ jobs:
     container:
       image: ${{ matrix.image }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
@@ -175,10 +175,10 @@ jobs:
       MACOSX_DEPLOYMENT_TARGET: ${{ startsWith(matrix.platform, 'darwin') && '14.0' || '' }}
       RUSTFLAGS: --remap-path-prefix=${{ github.workspace }}=/workspace --remap-path-prefix=${{ github.workspace }}/.gh-tmp=/tmp
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Check out ONNX Runtime for Intel macOS
         if: matrix.platform == 'darwin-x64'
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: microsoft/onnxruntime
           ref: v1.28.0
@@ -283,7 +283,7 @@ jobs:
       contents: write
       id-token: write
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: glypho-*
