@@ -1,6 +1,17 @@
-# Glypho native packages
+# Glypho native runtime
 
-These packages are release artifacts for `glypho-ocr`. Each one contains the
-native `glypho` executable and `libglypho` for exactly one operating system and
-CPU architecture. Install `glypho-ocr`; npm selects the matching optional
-dependency automatically.
+This is a platform-specific runtime package used by [`glypho-ocr`](https://www.npmjs.com/package/glypho-ocr).
+
+You normally **should not install this package directly**:
+
+```bash
+npm install glypho-ocr
+```
+
+npm selects the matching native package automatically through `optionalDependencies`.
+
+The package contains the native `glypho` executable and `libglypho` for one operating system and CPU architecture. OCR runs locally; required model files are downloaded separately on first use, verified and cached under `~/.glypho-ocr/models`.
+
+- 🌐 [Glypho Web](https://glypho.kaneki.cz)
+- GitHub: [rinqaku/Glypho](https://github.com/rinqaku/Glypho)
+- License: Apache-2.0
