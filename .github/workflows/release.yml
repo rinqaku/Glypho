@@ -207,9 +207,14 @@ jobs:
             --use_coreml \
             --cmake_extra_defines \
               CMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
-              CMAKE_POLICY_VERSION_MINIMUM=3.5
-          echo "ORT_LIB_LOCATION=$RUNNER_TEMP/onnxruntime/Release" >> "$GITHUB_ENV"
-          echo 'ORT_LIB_PROFILE=Release' >> "$GITHUB_ENV"
+              CMAKE_POLICY_VERSION_MINIMUM=3.5 \
+              onnxruntime_BUILD_UNIT_TESTS=OFF
+
+          ort_lib="$RUNNER_TEMP/onnxruntime/Release"
+          test -f "$ort_lib/libonnxruntime_common.a"
+          test -f "$ort_lib/_deps/onnx-build/libonnx.a"
+          test -f "$ort_lib/_deps/onnx-build/libonnx_proto.a"
+          echo "ORT_LIB_PATH=$ort_lib" >> "$GITHUB_ENV"
       - name: Build native runtime
         shell: bash
         run: |
