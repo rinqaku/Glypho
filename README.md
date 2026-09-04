@@ -13,7 +13,7 @@
 Local by default, easy to embed, and available from Rust, Python, Node.js and the browser.
 
 [![Crates.io](https://img.shields.io/crates/v/glypho-ocr?style=flat-square&logo=rust)](https://crates.io/crates/glypho-ocr)
-[![PyPI](https://img.shields.io/pypi/v/glypho-ocr?style=flat-square&logo=python)](https://pypi.org/project/glypho-ocr/)
+[![PyPI](https://img.shields.io/pypi/v/glypho-ocr.svg?style=flat-square&logo=pypi&label=PyPI)](https://pypi.org/project/glypho-ocr/)
 [![npm](https://img.shields.io/npm/v/glypho-ocr?style=flat-square&logo=npm)](https://www.npmjs.com/package/glypho-ocr)
 [![License](https://img.shields.io/badge/license-Apache--2.0-4c8bf5?style=flat-square)](LICENSE)
 
