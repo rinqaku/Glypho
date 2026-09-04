@@ -115,6 +115,9 @@ jobs:
         shell: bash
         run: npm pack --pack-destination ../../release
         working-directory: npm/${{ matrix.platform }}
+      - name: Smoke-test packed Node.js SDK
+        shell: bash
+        run: bash .github/tools/smoke_npm.sh '${{ matrix.platform }}' release
       - name: Create CLI archive
         shell: bash
         run: /opt/python/cp310-cp310/bin/python .github/tools/package_native.py '${{ matrix.platform }}' --target target/release --archive release
@@ -170,6 +173,9 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.14'
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '24'
       - name: Build ONNX Runtime for Intel macOS
         if: matrix.platform == 'darwin-x64'
         shell: bash
@@ -205,6 +211,9 @@ jobs:
         shell: bash
         run: npm pack --pack-destination ../../release
         working-directory: npm/${{ matrix.platform }}
+      - name: Smoke-test packed Node.js SDK
+        shell: bash
+        run: bash .github/tools/smoke_npm.sh '${{ matrix.platform }}' release
       - name: Create CLI archive
         shell: bash
         run: python .github/tools/package_native.py '${{ matrix.platform }}' --target target/release --archive release
@@ -233,6 +242,7 @@ jobs:
             release/*
 
   publish:
+    if: startsWith(github.ref, 'refs/tags/v')
     needs: [linux, native]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -264,26 +274,76 @@ jobs:
         run: |
           python -m pip install twine
           python -m twine check artifacts/*.whl artifacts/glypho_ocr-*.tar.gz
-          python -m twine upload artifacts/*.whl artifacts/glypho_ocr-*.tar.gz
+          python -m twine upload --non-interactive --skip-existing artifacts/*.whl artifacts/glypho_ocr-*.tar.gz
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
       - name: Publish npm native packages
         if: startsWith(github.ref, 'refs/tags/v')
-        run: for package in artifacts/glypho-ocr-*.tgz; do npm publish "$package" --access public --provenance; done
+        shell: bash
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./js/package.json').version")"
+          for target in darwin-arm64 darwin-x64 linux-arm64 linux-x64 win32-arm64 win32-x64; do
+            name="glypho-ocr-$target"
+            package="artifacts/$name-$VERSION.tgz"
+            test -f "$package"
+            if npm view "$name@$VERSION" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
+              echo "$name@$VERSION is already published; skipping"
+            else
+              npm publish "$package" --access public --provenance
+            fi
+          done
+      - name: Verify npm registry native resolution
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./js/package.json').version")"
+          WORK_DIR="$(mktemp -d)"
+          PACK_DIR="$(mktemp -d)"
+          trap 'rm -rf "$WORK_DIR" "$PACK_DIR"' EXIT
+          npm pack ./js --pack-destination "$PACK_DIR" >/dev/null
+          cat > "$WORK_DIR/package.json" <<'JSON'
+          {"name":"glypho-registry-smoke-test","private":true}
+          JSON
+          cd "$WORK_DIR"
+          npm install --no-audit --no-fund "$PACK_DIR/glypho-ocr-$VERSION.tgz"
+          npm ls glypho-ocr-linux-x64
+          npx --no-install glypho --version
       - name: Publish npm wrapper
         if: startsWith(github.ref, 'refs/tags/v')
-        working-directory: js
-        run: npm publish --access public --provenance
+        shell: bash
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      - name: Publish Cargo crate
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./js/package.json').version")"
+          if npm view "glypho-ocr@$VERSION" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
+            echo "glypho-ocr@$VERSION is already published; skipping"
+          else
+            npm publish ./js --access public --provenance
+          fi
+      - name: Publish Cargo crate if needed
         if: startsWith(github.ref, 'refs/tags/v')
-        run: cargo publish -p glypho-ocr --locked
+        shell: bash
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="$(python - <<'PY'
+          import tomllib
+          with open('Cargo.toml', 'rb') as file:
+              print(tomllib.load(file)['workspace']['package']['version'])
+          PY
+          )"
+          if curl --fail --silent --show-error "https://crates.io/api/v1/crates/glypho-ocr/$VERSION" >/dev/null 2>&1; then
+            echo "glypho-ocr@$VERSION is already published on crates.io; skipping"
+          else
+            cargo publish -p glypho-ocr --locked
+          fi
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         if: startsWith(github.ref, 'refs/tags/v')
         with:

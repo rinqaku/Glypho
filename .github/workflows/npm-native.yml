@@ -160,41 +160,9 @@ jobs:
         shell: bash
         env:
           TARGET: ${{ inputs.target }}
-        run: |
-          set -euo pipefail
-          rm -rf .npm-smoke
-          mkdir .npm-smoke
-          cd .npm-smoke
-          npm init -y >/dev/null
-          npm install \
-            --no-audit \
-            --no-fund \
-            "../release/glypho-ocr-$TARGET-0.1.0.tgz" \
-            "../release/glypho-ocr-0.1.0.tgz"
-          npx glypho --version
-          node --input-type=module <<'NODE'
-          import { Glypho } from 'glypho-ocr';
-          import path from 'node:path';
-
-          const ocr = new Glypho({
-            languages: ['en'],
-            quality: 'balanced',
-            device: 'cpu',
-          });
-
-          try {
-            const image = path.join(process.env.GITHUB_WORKSPACE, '.github', 'fixtures', 'english.png');
-            const document = await ocr.recognize(image);
-            if (document.text !== 'The quick brown fox jumps over 13 lazy dogs.') {
-              throw new Error(`Unexpected OCR text: ${JSON.stringify(document.text)}`);
-            }
-            console.log(document.text);
-          } finally {
-            await ocr.close();
-          }
-          NODE
+        run: bash .github/tools/smoke_npm.sh "$TARGET" release
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: glypho-npm-${{ inputs.target }}
-          path: release/glypho-ocr-${{ inputs.target }}-0.1.0.tgz
+          path: release/glypho-ocr-${{ inputs.target }}-*.tgz

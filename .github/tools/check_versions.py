@@ -18,18 +18,29 @@ def main() -> int:
     with (ROOT / 'Cargo.toml').open('rb') as file:
         version = tomllib.load(file)['workspace']['package']['version']
 
+    js_manifest = load_json(ROOT / 'js' / 'package.json')
     manifests = {
         'python/pyproject.toml': toml_version(ROOT / 'python' / 'pyproject.toml'),
-        'js/package.json': load_json(ROOT / 'js' / 'package.json')['version'],
+        'js/package.json': js_manifest['version'],
     }
+    native_packages: list[str] = []
     for path in sorted((ROOT / 'npm').glob('*/package.json')):
-        manifests[path.relative_to(ROOT).as_posix()] = load_json(path)['version']
+        manifest = load_json(path)
+        manifests[path.relative_to(ROOT).as_posix()] = manifest['version']
+        native_packages.append(str(manifest['name']))
 
     mismatches = [
         f'{path}: {value}'
         for path, value in manifests.items()
         if value != version
     ]
+    expected_optional = {name: version for name in native_packages}
+    actual_optional = js_manifest.get('optionalDependencies', {})
+    if actual_optional != expected_optional:
+        mismatches.append(
+            'js/package.json optionalDependencies do not exactly match '
+            f'the native packages at version {version}'
+        )
     tag = os.environ.get('GITHUB_REF_NAME', '')
     if tag.startswith('v') and tag[1:] != version:
         mismatches.append(f'git tag: {tag}')
