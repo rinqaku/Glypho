@@ -11,7 +11,7 @@ COPY public ./public
 COPY src ./src
 RUN npm run build
 
-FROM nginxinc/nginx-unprivileged:1.30-alpine3.24@sha256:9b87ad3dd9f431c733f19dfb278c7eb3dba9dca381942c79818bb42f1a566a83
+FROM nginxinc/nginx-unprivileged:1.31-alpine3.24@sha256:aa8c9087d36d93e9d650c5365f883b421e8214aedbad24ade52b844c583358f1
 
 LABEL org.opencontainers.image.title="Glypho Web" \
     org.opencontainers.image.description="Private, on-device OCR demo" \
