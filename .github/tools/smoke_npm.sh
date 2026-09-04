@@ -9,7 +9,11 @@ if command -v cygpath >/dev/null 2>&1; then
 fi
 PACKAGE_DIR="$(cd "$PACKAGE_DIR" && pwd)"
 VERSION="$(cd "$ROOT/js" && node -p "require('./package.json').version")"
-PLATFORM_PACKAGE="$PACKAGE_DIR/glypho-ocr-$TARGET-$VERSION.tgz"
+if [[ "$TARGET" == win32-* ]]; then
+  PLATFORM_PACKAGE="$PACKAGE_DIR/rinqaku-glypho-ocr-$TARGET-$VERSION.tgz"
+else
+  PLATFORM_PACKAGE="$PACKAGE_DIR/glypho-ocr-$TARGET-$VERSION.tgz"
+fi
 
 if [[ ! -f "$PLATFORM_PACKAGE" ]]; then
   echo "Missing platform package: $PLATFORM_PACKAGE" >&2

@@ -221,7 +221,12 @@ function platformPackage() {
     'win32-arm64': 'win32-arm64',
     'win32-x64': 'win32-x64',
   }[`${process.platform}-${process.arch}`];
-  return suffix ? `glypho-ocr-${suffix}` : undefined;
+  if (!suffix) {
+    return undefined;
+  }
+  return suffix.startsWith('win32-')
+    ? `@rinqaku/glypho-ocr-${suffix}`
+    : `glypho-ocr-${suffix}`;
 }
 
 function fileURLToPathSafe(value) {

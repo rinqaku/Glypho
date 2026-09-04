@@ -319,8 +319,14 @@ jobs:
           set -euo pipefail
           VERSION="$(node -p "require('./js/package.json').version")"
           for target in darwin-arm64 linux-arm64 linux-x64 win32-arm64 win32-x64; do
-            name="glypho-ocr-$target"
-            package="$GITHUB_WORKSPACE/artifacts/$name-$VERSION.tgz"
+            if [[ "$target" == win32-* ]]; then
+              name="@rinqaku/glypho-ocr-$target"
+              filename="rinqaku-glypho-ocr-$target-$VERSION.tgz"
+            else
+              name="glypho-ocr-$target"
+              filename="$name-$VERSION.tgz"
+            fi
+            package="$GITHUB_WORKSPACE/artifacts/$filename"
             test -f "$package"
             if npm view "$name@$VERSION" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
               echo "$name@$VERSION is already published; skipping"
