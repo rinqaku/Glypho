@@ -160,9 +160,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-15-intel
-            platform: darwin-x64
-            features: coreml
           - os: macos-15
             platform: darwin-arm64
             features: coreml
@@ -175,7 +172,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       CARGO_HOME: ${{ github.workspace }}/.gh-tmp/cargo-home
-      MACOSX_DEPLOYMENT_TARGET: ${{ matrix.platform == 'darwin-x64' && '15.0' || startsWith(matrix.platform, 'darwin') && '14.0' || '' }}
+      MACOSX_DEPLOYMENT_TARGET: ${{ startsWith(matrix.platform, 'darwin') && '14.0' || '' }}
       RUSTFLAGS: --remap-path-prefix=${{ github.workspace }}=/workspace --remap-path-prefix=${{ github.workspace }}/.gh-tmp=/tmp
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -321,7 +318,7 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="$(node -p "require('./js/package.json').version")"
-          for target in darwin-arm64 darwin-x64 linux-arm64 linux-x64 win32-arm64 win32-x64; do
+          for target in darwin-arm64 linux-arm64 linux-x64 win32-arm64 win32-x64; do
             name="glypho-ocr-$target"
             package="artifacts/$name-$VERSION.tgz"
             test -f "$package"

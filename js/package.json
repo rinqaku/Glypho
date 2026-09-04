@@ -36,7 +36,6 @@
   },
   "optionalDependencies": {
     "glypho-ocr-darwin-arm64": "0.1.0",
-    "glypho-ocr-darwin-x64": "0.1.0",
     "glypho-ocr-linux-arm64": "0.1.0",
     "glypho-ocr-linux-x64": "0.1.0",
     "glypho-ocr-win32-arm64": "0.1.0",

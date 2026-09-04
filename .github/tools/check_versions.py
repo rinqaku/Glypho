@@ -34,7 +34,12 @@ def main() -> int:
         for path, value in manifests.items()
         if value != version
     ]
-    expected_optional = {name: version for name in native_packages}
+    unpublished_native_packages = {'glypho-ocr-darwin-x64'}
+    expected_optional = {
+        name: version
+        for name in native_packages
+        if name not in unpublished_native_packages
+    }
     actual_optional = js_manifest.get('optionalDependencies', {})
     if actual_optional != expected_optional:
         mismatches.append(
