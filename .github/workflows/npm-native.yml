@@ -81,6 +81,10 @@ jobs:
         with:
           python-version: '3.14'
 
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v4
+        with:
+          node-version: '24'
+
       - name: Install Linux build dependencies
         if: startsWith(inputs.target, 'linux-')
         shell: bash
@@ -147,10 +151,10 @@ jobs:
           TARGET: ${{ inputs.target }}
         run: |
           set -euo pipefail
-          mkdir -p release
-          npm pack "npm/$TARGET" --pack-destination release
-          npm pack js --pack-destination release
-          ls -lh release/*.tgz
+          mkdir -p "$GITHUB_WORKSPACE/release"
+          (cd "npm/$TARGET" && npm pack --pack-destination "$GITHUB_WORKSPACE/release")
+          (cd js && npm pack --pack-destination "$GITHUB_WORKSPACE/release")
+          ls -lh "$GITHUB_WORKSPACE"/release/*.tgz
 
       - name: Smoke-test packed Node.js SDK
         shell: bash
