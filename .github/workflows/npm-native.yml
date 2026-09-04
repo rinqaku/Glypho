@@ -1,0 +1,196 @@
+name: Build npm native package
+run-name: npm ${{ inputs.target }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Native npm target to build
+        required: true
+        type: choice
+        options:
+          - linux-x64
+          - linux-arm64
+          - darwin-x64
+          - darwin-arm64
+          - win32-x64
+          - win32-arm64
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-native-${{ inputs.target }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      os: ${{ steps.config.outputs.os }}
+      features: ${{ steps.config.outputs.features }}
+    steps:
+      - id: config
+        shell: bash
+        env:
+          TARGET: ${{ inputs.target }}
+        run: |
+          case "$TARGET" in
+            linux-x64)
+              os='ubuntu-24.04'
+              features=''
+              ;;
+            linux-arm64)
+              os='ubuntu-24.04-arm'
+              features=''
+              ;;
+            darwin-x64)
+              os='macos-15-intel'
+              features=''
+              ;;
+            darwin-arm64)
+              os='macos-15'
+              features='coreml'
+              ;;
+            win32-x64)
+              os='windows-2025'
+              features=''
+              ;;
+            win32-arm64)
+              os='windows-11-arm'
+              features=''
+              ;;
+            *)
+              echo "Unknown target: $TARGET" >&2
+              exit 2
+              ;;
+          esac
+          echo "os=$os" >> "$GITHUB_OUTPUT"
+          echo "features=$features" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: prepare
+    runs-on: ${{ needs.prepare.outputs.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14'
+
+      - name: Install Linux build dependencies
+        if: startsWith(inputs.target, 'linux-')
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev pkg-config
+
+      - name: Build native runtime
+        shell: bash
+        env:
+          TARGET: ${{ inputs.target }}
+          FEATURES: ${{ needs.prepare.outputs.features }}
+        run: |
+          set -euo pipefail
+          args=(--release --locked -p glypho-ocr)
+          if [[ -n "$FEATURES" ]]; then
+            args+=(--features "$FEATURES")
+          fi
+          if [[ "$TARGET" == darwin-* ]]; then
+            export MACOSX_DEPLOYMENT_TARGET=14.0
+          fi
+          cargo build "${args[@]}"
+
+      - name: Inspect native runtime
+        shell: bash
+        env:
+          TARGET: ${{ inputs.target }}
+        run: |
+          set -euo pipefail
+          case "$TARGET" in
+            win32-*)
+              test -f target/release/glypho.exe
+              test -f target/release/glypho.dll
+              ./target/release/glypho.exe --version
+              ;;
+            darwin-*)
+              test -x target/release/glypho
+              test -f target/release/libglypho.dylib
+              ./target/release/glypho --version
+              otool -L target/release/glypho
+              otool -L target/release/libglypho.dylib
+              ;;
+            linux-*)
+              test -x target/release/glypho
+              test -f target/release/libglypho.so
+              ./target/release/glypho --version
+              ldd target/release/glypho
+              ldd target/release/libglypho.so
+              echo 'Highest GLIBC requirements:'
+              readelf --version-info target/release/glypho 2>/dev/null \
+                | grep -oE 'GLIBC_[0-9.]+' \
+                | sort -Vu \
+                | tail -n 8 || true
+              ;;
+          esac
+
+      - name: Stage npm platform package
+        shell: bash
+        run: python .github/tools/package_native.py '${{ inputs.target }}' --target target/release
+
+      - name: Pack npm packages
+        shell: bash
+        env:
+          TARGET: ${{ inputs.target }}
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          npm pack "npm/$TARGET" --pack-destination release
+          npm pack js --pack-destination release
+          ls -lh release/*.tgz
+
+      - name: Smoke-test packed Node.js SDK
+        shell: bash
+        env:
+          TARGET: ${{ inputs.target }}
+        run: |
+          set -euo pipefail
+          rm -rf .npm-smoke
+          mkdir .npm-smoke
+          cd .npm-smoke
+          npm init -y >/dev/null
+          npm install \
+            --no-audit \
+            --no-fund \
+            "../release/glypho-ocr-$TARGET-0.1.0.tgz" \
+            "../release/glypho-ocr-0.1.0.tgz"
+          npx glypho --version
+          node --input-type=module <<'NODE'
+          import { Glypho } from 'glypho-ocr';
+          import path from 'node:path';
+
+          const ocr = new Glypho({
+            languages: ['en'],
+            quality: 'balanced',
+            device: 'cpu',
+          });
+
+          try {
+            const image = path.join(process.env.GITHUB_WORKSPACE, '.github', 'fixtures', 'english.png');
+            const document = await ocr.recognize(image);
+            if (document.text !== 'The quick brown fox jumps over 13 lazy dogs.') {
+              throw new Error(`Unexpected OCR text: ${JSON.stringify(document.text)}`);
+            }
+            console.log(document.text);
+          } finally {
+            await ocr.close();
+          }
+          NODE
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: glypho-npm-${{ inputs.target }}
+          path: release/glypho-ocr-${{ inputs.target }}-0.1.0.tgz
