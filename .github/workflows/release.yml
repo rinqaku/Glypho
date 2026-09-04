@@ -377,7 +377,7 @@ jobs:
               print(tomllib.load(file)['workspace']['package']['version'])
           PY
           )"
-          if curl --fail --silent --show-error "https://crates.io/api/v1/crates/glypho-ocr/$VERSION" >/dev/null 2>&1; then
+          if cargo info "glypho-ocr@$VERSION" --registry crates-io >/dev/null 2>&1; then
             echo "glypho-ocr@$VERSION is already published on crates.io; skipping"
           else
             cargo publish -p glypho-ocr --locked
