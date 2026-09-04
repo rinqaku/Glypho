@@ -211,9 +211,16 @@ jobs:
               onnxruntime_BUILD_UNIT_TESTS=OFF
 
           ort_lib="$RUNNER_TEMP/onnxruntime/Release"
+
+          # re2 is declared EXCLUDE_FROM_ALL by ONNX Runtime. With unit tests
+          # disabled it is not pulled into the default build, but ort-sys' static
+          # linker still expects libre2.a to be present.
+          cmake --build "$ort_lib" --config Release --target re2 --parallel 4
+
           test -f "$ort_lib/libonnxruntime_common.a"
           test -f "$ort_lib/_deps/onnx-build/libonnx.a"
           test -f "$ort_lib/_deps/onnx-build/libonnx_proto.a"
+          test -f "$ort_lib/_deps/re2-build/libre2.a"
           echo "ORT_LIB_PATH=$ort_lib" >> "$GITHUB_ENV"
       - name: Build native runtime
         shell: bash
