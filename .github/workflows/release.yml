@@ -17,8 +17,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     env:
-      CARGO_HOME: ${{ runner.temp }}/cargo-home
-      RUSTFLAGS: --remap-path-prefix=${{ github.workspace }}=/workspace --remap-path-prefix=${{ runner.temp }}=/tmp
+      CARGO_HOME: ${{ github.workspace }}/.gh-tmp/cargo-home
+      RUSTFLAGS: --remap-path-prefix=${{ github.workspace }}=/workspace --remap-path-prefix=${{ github.workspace }}/.gh-tmp=/tmp
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
@@ -72,8 +72,8 @@ jobs:
             features: ''
     runs-on: ${{ matrix.os }}
     env:
-      CARGO_HOME: ${{ runner.temp }}/cargo-home
-      RUSTFLAGS: --remap-path-prefix=${{ github.workspace }}=/workspace --remap-path-prefix=${{ runner.temp }}=/tmp
+      CARGO_HOME: ${{ github.workspace }}/.gh-tmp/cargo-home
+      RUSTFLAGS: --remap-path-prefix=${{ github.workspace }}=/workspace --remap-path-prefix=${{ github.workspace }}/.gh-tmp=/tmp
     container:
       image: ${{ matrix.image }}
     steps:
@@ -152,9 +152,9 @@ jobs:
             features: ''
     runs-on: ${{ matrix.os }}
     env:
-      CARGO_HOME: ${{ runner.temp }}/cargo-home
+      CARGO_HOME: ${{ github.workspace }}/.gh-tmp/cargo-home
       MACOSX_DEPLOYMENT_TARGET: ${{ startsWith(matrix.platform, 'darwin') && '14.0' || '' }}
-      RUSTFLAGS: --remap-path-prefix=${{ github.workspace }}=/workspace --remap-path-prefix=${{ runner.temp }}=/tmp
+      RUSTFLAGS: --remap-path-prefix=${{ github.workspace }}=/workspace --remap-path-prefix=${{ github.workspace }}/.gh-tmp=/tmp
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Check out ONNX Runtime for Intel macOS
