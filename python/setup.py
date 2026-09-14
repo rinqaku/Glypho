@@ -33,8 +33,11 @@ class BuildPy(build_py):
         self._build_native()
         super().run()
         package = Path(self.build_lib) / 'glypho'
-        self._copy_artifact(_library_path(), package / '_libs')
-        self._copy_artifact(_binary_path(), package / '_bin')
+        native = package / '_native'
+        self._copy_artifact(_library_path(), native)
+        self._copy_artifact(_binary_path(), native)
+        for source in _runtime_libraries():
+            self._copy_artifact(source, native)
 
     def _build_native(self) -> None:
         if os.environ.get('GLYPHO_SKIP_NATIVE_BUILD') == '1':
@@ -93,6 +96,21 @@ def _library_path() -> Path:
 def _binary_path() -> Path:
     name = 'glypho.exe' if platform.system() == 'Windows' else 'glypho'
     return _target_directory() / 'release' / name
+
+
+def _runtime_libraries() -> list[Path]:
+    names = {
+        'Darwin': ('libonnxruntime_providers_shared.dylib',),
+        'Windows': (
+            'onnxruntime_providers_shared.dll',
+            'onnxruntime_providers_cuda.dll',
+        ),
+    }.get(platform.system(), (
+        'libonnxruntime_providers_shared.so',
+        'libonnxruntime_providers_cuda.so',
+    ))
+    target = _target_directory() / 'release'
+    return [target / name for name in names if (target / name).is_file()]
 
 
 setup(

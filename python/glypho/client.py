@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import json
+import io
 import math
 import os
 import shutil
 import subprocess
+import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from ._native import NativeLibrary
 from .errors import GlyphoNotFoundError, RecognitionError
@@ -123,8 +125,9 @@ class Glypho:
 
     def recognize(
         self,
-        image: str | os.PathLike[str],
+        image: object,
         *,
+        file_name: str = 'image.png',
         backend: Backend | None = None,
         languages: tuple[str, ...] | list[str] | None = None,
         models: str | os.PathLike[str] | None = None,
@@ -136,9 +139,6 @@ class Glypho:
         threads: int | None = None,
         timeout: float = 30.0,
     ) -> Document:
-        path = Path(image).expanduser().resolve()
-        if not path.is_file():
-            raise FileNotFoundError(path)
         if not math.isfinite(timeout) or not 0.0 < timeout <= 300.0:
             raise ValueError('timeout must be between 0 and 300 seconds')
 
@@ -155,10 +155,29 @@ class Glypho:
             threads=threads if threads is not None else self.threads,
             timeout_ms=max(1, round(timeout * 1000)),
         )
-        if self._native:
-            payload = self._native.recognize(path, options.to_json())
+        if isinstance(image, (str, os.PathLike)):
+            path = Path(image).expanduser().resolve()
+            if not path.is_file():
+                raise FileNotFoundError(path)
+            payload = (
+                self._native.recognize(path, options.to_json())
+                if self._native
+                else self._recognize_with_cli(path, options, timeout)
+            )
         else:
-            payload = self._recognize_with_cli(path, options, timeout)
+            encoded = _encode_image(image)
+            if self._native:
+                payload = self._native.recognize_bytes(encoded, file_name, options.to_json())
+            else:
+                suffix = Path(file_name).suffix or '.png'
+                temporary = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+                try:
+                    temporary.write(encoded)
+                    temporary.close()
+                    payload = self._recognize_with_cli(Path(temporary.name), options, timeout)
+                finally:
+                    temporary.close()
+                    Path(temporary.name).unlink(missing_ok=True)
 
         try:
             return Document.from_dict(json.loads(payload))
@@ -260,9 +279,11 @@ def _find_binary(configured: str | os.PathLike[str] | None) -> Path:
         raise GlyphoNotFoundError(f'Glypho CLI not found: {path}')
 
     packaged_name = 'glypho.exe' if os.name == 'nt' else 'glypho'
-    packaged = Path(__file__).resolve().parent / '_bin' / packaged_name
-    if packaged.is_file():
-        return packaged
+    package = Path(__file__).resolve().parent
+    for directory in ('_native', '_bin'):
+        packaged = package / directory / packaged_name
+        if packaged.is_file():
+            return packaged
 
     root = Path(__file__).resolve().parents[2]
     for profile in ('release', 'debug'):
@@ -276,3 +297,21 @@ def _find_binary(configured: str | os.PathLike[str] | None) -> Path:
     raise GlyphoNotFoundError(
         'Glypho was not found; reinstall `glypho-ocr` or pass binary=...'
     )
+
+
+def _encode_image(image: Any) -> bytes:
+    if isinstance(image, (bytes, bytearray, memoryview)):
+        return bytes(image)
+    if hasattr(image, 'save') and hasattr(image, 'size'):
+        output = io.BytesIO()
+        image.save(output, format='PNG')
+        return output.getvalue()
+    if hasattr(image, 'shape') and hasattr(image, 'dtype'):
+        try:
+            from PIL import Image
+        except ImportError as error:
+            raise TypeError('NumPy image inputs require Pillow') from error
+        output = io.BytesIO()
+        Image.fromarray(image).save(output, format='PNG')
+        return output.getvalue()
+    raise TypeError('image must be a path, encoded bytes, Pillow image, or NumPy array')

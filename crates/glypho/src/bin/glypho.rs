@@ -3,6 +3,7 @@ use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use clap::{Parser, Subcommand, ValueEnum};
@@ -43,6 +44,8 @@ struct Cli {
     output: Option<PathBuf>,
     #[arg(long, help = "Disable model downloads and use the local cache only")]
     offline: bool,
+    #[arg(long, default_value_t = 30, help = "Recognition timeout in seconds")]
+    timeout: u64,
 }
 
 #[derive(Debug, Subcommand)]
@@ -241,6 +244,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         format,
         output,
         offline,
+        timeout,
     } = cli;
     if let Some(input) = input {
         if command.is_some() {
@@ -251,9 +255,15 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             segmentation: segmentation.into(),
             min_confidence,
         };
+        reject_same_output(&input, output.as_deref())?;
         let document =
             match select_backend(BackendArg::Onnx, models, quality, device, threads, offline)? {
-                SelectedBackend::Onnx(engine) => engine.recognize(&input, &options)?,
+                SelectedBackend::Onnx(engine) => recognize_onnx_with_timeout(
+                    engine,
+                    input,
+                    options,
+                    Duration::from_secs(timeout),
+                )?,
                 SelectedBackend::Tesseract => unreachable!("short form always uses ONNX"),
             };
         write_document(&document, output.as_deref(), format)?;
@@ -279,11 +289,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             timeout,
             pretty,
         } => {
-            if let Some(output) = output.as_deref()
-                && paths_refer_to_same_file(&input, output)?
-            {
-                return Err("output path must not overwrite the input image".into());
-            }
+            reject_same_output(&input, output.as_deref())?;
             let options = RecognitionOptions {
                 languages,
                 segmentation: segmentation.into(),
@@ -291,7 +297,12 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             };
             let document = match select_backend(backend, models, quality, device, threads, offline)?
             {
-                SelectedBackend::Onnx(engine) => engine.recognize(input, &options)?,
+                SelectedBackend::Onnx(engine) => recognize_onnx_with_timeout(
+                    engine,
+                    input,
+                    options,
+                    Duration::from_secs(timeout),
+                )?,
                 SelectedBackend::Tesseract => {
                     let engine = Glypho::new(TesseractConfig {
                         binary: tesseract,
@@ -518,6 +529,30 @@ fn default_min_confidence() -> f32 {
     0.8
 }
 
+fn recognize_onnx_with_timeout(
+    engine: Box<OnnxEngine>,
+    image: PathBuf,
+    options: RecognitionOptions,
+    timeout: Duration,
+) -> Result<Document, Box<dyn std::error::Error>> {
+    if timeout.is_zero() {
+        return Err("timeout must be greater than zero".into());
+    }
+    let (send, receive) = std::sync::mpsc::sync_channel(1);
+    thread::spawn(move || {
+        let _ = send.send(engine.recognize(image, &options));
+    });
+    match receive.recv_timeout(timeout) {
+        Ok(result) => result.map_err(Into::into),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            Err(format!("recognition timed out after {}ms", timeout.as_millis()).into())
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            Err("recognition worker stopped unexpectedly".into())
+        }
+    }
+}
+
 fn select_backend(
     backend: BackendArg,
     models: Option<PathBuf>,
@@ -557,6 +592,19 @@ fn paths_refer_to_same_file(left: &Path, right: &Path) -> io::Result<bool> {
         Err(error) => return Err(error),
     };
     Ok(left == right)
+}
+
+fn reject_same_output(
+    input: &Path,
+    output: Option<&Path>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(output) = output else {
+        return Ok(());
+    };
+    if paths_refer_to_same_file(input, output)? {
+        return Err("output path must not overwrite the input image".into());
+    }
+    Ok(())
 }
 
 fn read_document(path: &Path) -> Result<Document, Box<dyn std::error::Error>> {
@@ -670,6 +718,30 @@ fn create_temporary(parent: &Path, file_name: &str) -> io::Result<(PathBuf, fs::
 #[cfg(not(windows))]
 fn replace_file(source: &Path, target: &Path) -> io::Result<()> {
     fs::rename(source, target)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_input_as_output_before_writing() {
+        let directory = std::env::temp_dir().join(format!(
+            "glypho-cli-path-test-{}-{}",
+            std::process::id(),
+            TEMP_COUNTER.fetch_add(1, Ordering::Relaxed),
+        ));
+        fs::create_dir_all(&directory).expect("temporary directory must be created");
+        let input = directory.join("image.png");
+        fs::write(&input, b"original").expect("temporary input must be written");
+
+        let error = reject_same_output(&input, Some(&input))
+            .expect_err("the same input and output must be rejected");
+
+        assert!(error.to_string().contains("must not overwrite"));
+        assert_eq!(fs::read(&input).unwrap(), b"original");
+        fs::remove_dir_all(directory).expect("temporary directory must be removed");
+    }
 }
 
 #[cfg(windows)]

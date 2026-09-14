@@ -39,6 +39,14 @@ def test_recognizes_synthetic_image(sample_image: Path):
     assert 'TEST' in document.text.upper()
     assert document.lines
 
+    memory_document = engine.recognize(
+        SAMPLE_PNG,
+        file_name='glypho-memory.png',
+        segmentation='single_line',
+    )
+    assert memory_document.image.file_name == 'glypho-memory.png'
+    assert 'GLYPHO' in memory_document.text.upper()
+
 
 def test_rejects_non_finite_timeout(sample_image: Path):
     engine = Glypho()

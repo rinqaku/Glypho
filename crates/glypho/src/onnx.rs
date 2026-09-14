@@ -1,5 +1,5 @@
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufReader, Read, Write};
+use std::io::{BufReader, Cursor, Read, Seek, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -20,7 +20,7 @@ use oar_ocr::domain::adapters::{
 };
 use oar_ocr::domain::tasks::{TextDetectionConfig, TextRecognitionConfig};
 use oar_ocr::oarocr::{EdgeProcessor, TextCroppingProcessor, TextRegion as OarTextRegion};
-use oar_ocr::processors::{BoundingBox, LimitType, sort_quad_boxes};
+use oar_ocr::processors::{BoundingBox, LimitType, Point as OarPoint, sort_quad_boxes};
 #[cfg(any(feature = "cuda", feature = "coreml", feature = "openvino"))]
 use ort::ep::ExecutionProvider;
 use serde::{Deserialize, Serialize};
@@ -146,11 +146,12 @@ pub struct OnnxInfo {
 pub struct OnnxEngine {
     config: OnnxConfig,
     profile: ModelProfile,
-    detector: OnceLock<std::result::Result<TextDetectionAdapter, String>>,
-    primary: OnceLock<std::result::Result<TextRecognitionAdapter, String>>,
-    latin: OnceLock<std::result::Result<TextRecognitionAdapter, String>>,
-    cyrillic: OnceLock<std::result::Result<TextRecognitionAdapter, String>>,
-    korean: OnceLock<std::result::Result<TextRecognitionAdapter, String>>,
+    detector: OnceLock<TextDetectionAdapter>,
+    primary: OnceLock<TextRecognitionAdapter>,
+    latin: OnceLock<TextRecognitionAdapter>,
+    cyrillic: OnceLock<TextRecognitionAdapter>,
+    korean: OnceLock<TextRecognitionAdapter>,
+    initialization: Mutex<()>,
     model_name: String,
     device: Mutex<DeviceResolution>,
 }
@@ -169,6 +170,7 @@ impl OnnxEngine {
             latin: OnceLock::new(),
             cyrillic: OnceLock::new(),
             korean: OnceLock::new(),
+            initialization: Mutex::new(()),
             model_name: profile.name.to_owned(),
             device: Mutex::new(device),
         })
@@ -179,17 +181,36 @@ impl OnnxEngine {
         image_path: impl AsRef<Path>,
         options: &RecognitionOptions,
     ) -> Result<Document> {
-        validate_min_confidence(options.min_confidence)?;
-        let image_path = image_path.as_ref();
-        let image = self.load_image(image_path)?;
-        let width = image.width();
-        let height = image.height();
-        let languages = resolve_languages(&options.languages)?;
-        validate_profile_languages(self.config.quality, &languages)?;
-        let started = Instant::now();
-        let regions = self.recognize_regions(image, &languages)?;
-        let elapsed_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+        self.recognize_inner(image_path.as_ref(), options)
+    }
 
+    pub fn recognize_bytes(
+        &self,
+        image_bytes: &[u8],
+        file_name: impl Into<String>,
+        options: &RecognitionOptions,
+    ) -> Result<Document> {
+        validate_min_confidence(options.min_confidence)?;
+        let started = Instant::now();
+        let file_name = file_name.into();
+        if file_name.trim().is_empty() {
+            return Err(Error::InvalidOption(
+                "file_name must not be empty".to_owned(),
+            ));
+        }
+        let image = self.load_image_bytes(image_bytes)?;
+        let image_id = Path::new(&file_name)
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .unwrap_or("image")
+            .to_owned();
+        self.recognize_image(image, file_name, image_id, options, started)
+    }
+
+    fn recognize_inner(&self, image_path: &Path, options: &RecognitionOptions) -> Result<Document> {
+        validate_min_confidence(options.min_confidence)?;
+        let started = Instant::now();
+        let image = self.load_image(image_path)?;
         let file_name = image_path
             .file_name()
             .and_then(|name| name.to_str())
@@ -200,6 +221,24 @@ impl OnnxEngine {
             .and_then(|name| name.to_str())
             .unwrap_or("image")
             .to_owned();
+        self.recognize_image(image, file_name, image_id, options, started)
+    }
+
+    fn recognize_image(
+        &self,
+        image: RgbImage,
+        file_name: String,
+        image_id: String,
+        options: &RecognitionOptions,
+        started: Instant,
+    ) -> Result<Document> {
+        let width = image.width();
+        let height = image.height();
+        let languages = resolve_languages(&options.languages)?;
+        validate_profile_languages(self.config.quality, &languages)?;
+        let regions = self.recognize_regions(image, &languages, options.min_confidence)?;
+        let elapsed_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+
         let mut document = Document::new(ImageInfo {
             id: image_id,
             file_name,
@@ -223,11 +262,7 @@ impl OnnxEngine {
             let line_index = document.lines.len() + 1;
             let line_id = format!("line-{line_index:04}");
             let words = build_words(&line_id, &candidate.region, text, confidence, width, height);
-            let alternatives = candidate
-                .alternative
-                .filter(|alternative| alternative.text != text)
-                .into_iter()
-                .collect();
+            let alternatives = candidate.alternatives;
             document.lines.push(TextLine {
                 id: line_id,
                 order: 0,
@@ -307,6 +342,7 @@ impl OnnxEngine {
         &self,
         image: RgbImage,
         languages: &[String],
+        min_confidence: f32,
     ) -> Result<Vec<MergedRegion>> {
         let auto_languages = languages.is_empty();
         let plan = recognizer_plan(languages);
@@ -372,7 +408,7 @@ impl OnnxEngine {
                 self.recognize_crops(self.latin()?, &crops)?,
             ));
         }
-        if plan.cyrillic {
+        if !auto_languages && plan.cyrillic {
             let indices = specialist_crop_indices(primary.as_deref(), crops.len());
             if !indices.is_empty() {
                 specialists.push((
@@ -381,7 +417,7 @@ impl OnnxEngine {
                 ));
             }
         }
-        if plan.korean {
+        if !auto_languages && plan.korean {
             specialists.push((
                 SpecialistScript::Korean,
                 self.recognize_crops(self.korean()?, &crops)?,
@@ -392,10 +428,49 @@ impl OnnxEngine {
             primary,
             &specialists,
             auto_languages,
+            min_confidence,
         ))
     }
 
     fn detect_boxes(&self, image: Arc<RgbImage>) -> Result<Vec<BoundingBox>> {
+        if !should_tile_image(image.width(), image.height(), self.profile.max_side_len) {
+            return self.detect_boxes_single(image);
+        }
+        let portrait = image.height() >= image.width();
+        let long_side = if portrait {
+            image.height()
+        } else {
+            image.width()
+        };
+        let mut boxes = Vec::new();
+        for offset in tile_offsets(long_side, self.profile.max_side_len) {
+            let (x, y, width, height) = if portrait {
+                (
+                    0,
+                    offset,
+                    image.width(),
+                    self.profile.max_side_len.min(image.height() - offset),
+                )
+            } else {
+                (
+                    offset,
+                    0,
+                    self.profile.max_side_len.min(image.width() - offset),
+                    image.height(),
+                )
+            };
+            let tile =
+                Arc::new(image::imageops::crop_imm(image.as_ref(), x, y, width, height).to_image());
+            boxes.extend(
+                self.detect_boxes_single(tile)?
+                    .into_iter()
+                    .map(|box_| box_.translate(x as f32, y as f32)),
+            );
+        }
+        Ok(deduplicate_boxes(boxes))
+    }
+
+    fn detect_boxes_single(&self, image: Arc<RgbImage>) -> Result<Vec<BoundingBox>> {
         let mut output = self
             .detector()?
             .execute(ImageTaskInput::from_arc_images(vec![image]), None)
@@ -429,6 +504,10 @@ impl OnnxEngine {
         });
         let mut candidates = vec![None; crops.len()];
         for chunk in order.chunks(self.profile.region_batch_size) {
+            let batch_max_ratio = chunk
+                .iter()
+                .map(|index| crop_ratio(&crops[*index]))
+                .fold(1.0_f32, f32::max);
             let input = ImageTaskInput::from_arc_images(
                 chunk
                     .iter()
@@ -445,6 +524,19 @@ impl OnnxEngine {
                     candidates[*index] = Some(RecognizedCandidate {
                         text: text.to_owned(),
                         confidence,
+                        char_positions: output
+                            .char_positions
+                            .get(offset)
+                            .cloned()
+                            .unwrap_or_default(),
+                        char_columns: output
+                            .char_col_indices
+                            .get(offset)
+                            .cloned()
+                            .unwrap_or_default(),
+                        sequence_length: *output.sequence_lengths.get(offset).unwrap_or(&0),
+                        crop_ratio: crop_ratio(&crops[*index]),
+                        batch_max_ratio,
                     });
                 }
             }
@@ -453,12 +545,9 @@ impl OnnxEngine {
     }
 
     fn detector(&self) -> Result<&TextDetectionAdapter> {
-        let result = self
-            .detector
-            .get_or_init(|| self.build_detector().map_err(|error| error.to_string()));
-        result
-            .as_ref()
-            .map_err(|message| backend_error(message.clone()))
+        retryable_init(&self.detector, &self.initialization, || {
+            self.build_detector()
+        })
     }
 
     fn primary(&self) -> Result<&TextRecognitionAdapter> {
@@ -479,16 +568,12 @@ impl OnnxEngine {
 
     fn recognizer<'a>(
         &'a self,
-        cache: &'a OnceLock<std::result::Result<TextRecognitionAdapter, String>>,
+        cache: &'a OnceLock<TextRecognitionAdapter>,
         artifacts: RecognizerArtifacts,
     ) -> Result<&'a TextRecognitionAdapter> {
-        let result = cache.get_or_init(|| {
+        retryable_init(cache, &self.initialization, || {
             self.build_recognizer(artifacts)
-                .map_err(|error| error.to_string())
-        });
-        result
-            .as_ref()
-            .map_err(|message| backend_error(message.clone()))
+        })
     }
 
     fn build_detector(&self) -> Result<TextDetectionAdapter> {
@@ -554,6 +639,7 @@ impl OnnxEngine {
                 score_threshold: 0.0,
             })
             .character_dict(dictionary.to_vec())
+            .return_word_box(true)
             .build(artifacts.model.path(&self.config.models_dir))
             .map_err(|error| backend_error(error.to_string()))
     }
@@ -660,13 +746,33 @@ impl OnnxEngine {
         }
 
         let file = File::open(path).map_err(|error| Error::io(path, error))?;
-        let mut reader = ImageReader::new(BufReader::new(file))
+        let reader = ImageReader::new(BufReader::new(file))
             .with_guessed_format()
             .map_err(|error| Error::io(path, error))?;
+        self.decode_image(reader)
+    }
+
+    fn load_image_bytes(&self, bytes: &[u8]) -> Result<RgbImage> {
+        if bytes.is_empty() || bytes.len() as u64 > self.config.max_file_bytes {
+            return Err(Error::InvalidOption(format!(
+                "encoded image must contain between 1 and {} bytes",
+                self.config.max_file_bytes
+            )));
+        }
+        let reader = ImageReader::new(Cursor::new(bytes))
+            .with_guessed_format()
+            .map_err(|error| backend_error(format!("could not inspect image: {error}")))?;
+        self.decode_image(reader)
+    }
+
+    fn decode_image<R: std::io::BufRead + Seek>(
+        &self,
+        mut reader: ImageReader<R>,
+    ) -> Result<RgbImage> {
         let mut limits = Limits::default();
         limits.max_alloc = Some(self.config.max_image_pixels.saturating_mul(4));
         reader.limits(limits);
-        let decoder = reader
+        let mut decoder = reader
             .into_decoder()
             .map_err(|error| backend_error(format!("could not inspect image: {error}")))?;
         let (width, height) = decoder.dimensions();
@@ -677,22 +783,31 @@ impl OnnxEngine {
                 self.config.max_image_pixels
             )));
         }
-        DynamicImage::from_decoder(decoder)
-            .map(DynamicImage::into_rgb8)
-            .map_err(|error| backend_error(format!("could not decode image: {error}")))
+        let orientation = decoder
+            .orientation()
+            .unwrap_or(image::metadata::Orientation::NoTransforms);
+        let mut image = DynamicImage::from_decoder(decoder)
+            .map_err(|error| backend_error(format!("could not decode image: {error}")))?;
+        image.apply_orientation(orientation);
+        Ok(image.into_rgb8())
     }
 }
 
 #[derive(Clone, Debug)]
 struct MergedRegion {
     region: OarTextRegion,
-    alternative: Option<TextAlternative>,
+    alternatives: Vec<TextAlternative>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 struct RecognizedCandidate {
     text: String,
     confidence: f32,
+    char_positions: Vec<f32>,
+    char_columns: Vec<usize>,
+    sequence_length: usize,
+    crop_ratio: f32,
+    batch_max_ratio: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -1444,7 +1559,9 @@ fn file_sha256(path: &Path) -> Result<String> {
 }
 
 fn resolve_languages(requested: &[String]) -> Result<Vec<String>> {
-    if requested.is_empty() {
+    if requested.is_empty()
+        || (requested.len() == 1 && requested[0].trim().eq_ignore_ascii_case("auto"))
+    {
         return Ok(Vec::new());
     }
     let mut languages = Vec::new();
@@ -1532,6 +1649,77 @@ fn normalize_language(language: &str) -> String {
 
 fn crop_ratio(image: &RgbImage) -> f32 {
     image.width() as f32 / image.height().max(1) as f32
+}
+
+fn should_tile_image(width: u32, height: u32, tile_size: u32) -> bool {
+    let long_side = width.max(height);
+    let short_side = width.min(height).max(1);
+    long_side > tile_size.saturating_mul(3) / 2 && long_side as f32 / short_side as f32 >= 2.0
+}
+
+fn tile_offsets(length: u32, tile_size: u32) -> Vec<u32> {
+    if length <= tile_size {
+        return vec![0];
+    }
+    let span = length - tile_size;
+    let intervals = span.div_ceil(tile_size).max(1);
+    (0..=intervals)
+        .map(|index| ((u64::from(span) * u64::from(index)) / u64::from(intervals)) as u32)
+        .collect()
+}
+
+fn deduplicate_boxes(mut boxes: Vec<BoundingBox>) -> Vec<BoundingBox> {
+    boxes.sort_by(|left, right| box_area(right).total_cmp(&box_area(left)));
+    let mut unique = Vec::with_capacity(boxes.len());
+    for candidate in boxes {
+        if unique
+            .iter()
+            .any(|existing| overlap_over_smaller(&candidate, existing) >= 0.65)
+        {
+            continue;
+        }
+        unique.push(candidate);
+    }
+    sort_quad_boxes(&unique)
+}
+
+fn box_area(box_: &BoundingBox) -> f32 {
+    let Some((min_x, min_y, max_x, max_y)) = box_bounds(box_) else {
+        return 0.0;
+    };
+    (max_x - min_x).max(0.0) * (max_y - min_y).max(0.0)
+}
+
+fn overlap_over_smaller(left: &BoundingBox, right: &BoundingBox) -> f32 {
+    let Some((left_x1, left_y1, left_x2, left_y2)) = box_bounds(left) else {
+        return 0.0;
+    };
+    let Some((right_x1, right_y1, right_x2, right_y2)) = box_bounds(right) else {
+        return 0.0;
+    };
+    let intersection_width = (left_x2.min(right_x2) - left_x1.max(right_x1)).max(0.0);
+    let intersection_height = (left_y2.min(right_y2) - left_y1.max(right_y1)).max(0.0);
+    let smaller = box_area(left).min(box_area(right));
+    if smaller <= f32::EPSILON {
+        0.0
+    } else {
+        intersection_width * intersection_height / smaller
+    }
+}
+
+fn box_bounds(box_: &BoundingBox) -> Option<(f32, f32, f32, f32)> {
+    let first = box_.points.first()?;
+    let mut min_x = first.x;
+    let mut min_y = first.y;
+    let mut max_x = first.x;
+    let mut max_y = first.y;
+    for point in &box_.points[1..] {
+        min_x = min_x.min(point.x);
+        min_y = min_y.min(point.y);
+        max_x = max_x.max(point.x);
+        max_y = max_y.max(point.y);
+    }
+    Some((min_x, min_y, max_x, max_y))
 }
 
 fn wants_language_group(languages: &[String], group: &[&str]) -> bool {
@@ -1622,25 +1810,28 @@ fn merge_recognized_regions(
     primary: Option<Vec<Option<RecognizedCandidate>>>,
     specialists: &[(SpecialistScript, Vec<Option<RecognizedCandidate>>)],
     auto_languages: bool,
+    min_confidence: f32,
 ) -> Vec<MergedRegion> {
     boxes
         .iter()
         .enumerate()
         .filter_map(|(index, box_)| {
-            let mut selected = candidate_at(primary.as_deref(), index)
-                .map(|candidate| recognized_region(box_, candidate));
-            for (script, candidates) in specialists {
-                let specialist = candidate_at(Some(candidates), index)
-                    .map(|candidate| recognized_region(box_, candidate));
-                selected = match (selected, specialist) {
-                    (Some(primary), Some(specialist)) => {
-                        Some(select_region(primary, specialist, *script, auto_languages))
-                    }
-                    (Some(region), None) | (None, Some(region)) => Some(region),
-                    (None, None) => None,
-                };
+            let mut candidates = Vec::new();
+            if let Some(candidate) = candidate_at(primary.as_deref(), index) {
+                candidates.push(RoutedCandidate {
+                    candidate,
+                    specialist: None,
+                });
             }
-            selected
+            for (script, specialist_candidates) in specialists {
+                if let Some(candidate) = candidate_at(Some(specialist_candidates), index) {
+                    candidates.push(RoutedCandidate {
+                        candidate,
+                        specialist: Some(*script),
+                    });
+                }
+            }
+            select_region(box_, candidates, auto_languages, min_confidence)
         })
         .collect()
 }
@@ -1652,7 +1843,18 @@ fn candidate_at(
     candidates?.get(index)?.clone()
 }
 
-fn recognized_region(box_: &BoundingBox, candidate: RecognizedCandidate) -> MergedRegion {
+#[derive(Clone, Debug)]
+struct RoutedCandidate {
+    candidate: RecognizedCandidate,
+    specialist: Option<SpecialistScript>,
+}
+
+fn recognized_region(
+    box_: &BoundingBox,
+    candidate: RecognizedCandidate,
+    alternatives: Vec<TextAlternative>,
+) -> MergedRegion {
+    let word_boxes = candidate_word_boxes(box_, &candidate);
     let mut region = OarTextRegion::with_recognition(
         box_.clone(),
         Some(Arc::<str>::from(candidate.text)),
@@ -1660,47 +1862,98 @@ fn recognized_region(box_: &BoundingBox, candidate: RecognizedCandidate) -> Merg
     );
     region.dt_poly = Some(box_.clone());
     region.rec_poly = Some(box_.clone());
+    region.word_boxes = (!word_boxes.is_empty()).then_some(word_boxes);
     MergedRegion {
         region,
-        alternative: None,
+        alternatives,
     }
 }
 
 fn select_region(
-    primary: MergedRegion,
-    specialist: MergedRegion,
-    script: SpecialistScript,
+    box_: &BoundingBox,
+    candidates: Vec<RoutedCandidate>,
     auto_languages: bool,
-) -> MergedRegion {
-    let primary_candidate = candidate(&primary.region);
-    let specialist_candidate = candidate(&specialist.region);
-    let use_specialist = match (&primary_candidate, &specialist_candidate) {
-        (_, None) => false,
-        (None, Some(_)) => true,
-        (Some((_, primary_score)), Some((specialist_text, specialist_score))) => {
-            if auto_languages
-                && script != SpecialistScript::Latin
-                && contains_script(specialist_text, script)
-            {
-                specialist_score >= &0.75
-            } else if contains_script(specialist_text, script) {
-                specialist_score >= &(primary_score - 0.18)
-            } else {
-                specialist_score > &(primary_score + 0.08)
-            }
+    min_confidence: f32,
+) -> Option<MergedRegion> {
+    let mut eligible = candidates
+        .into_iter()
+        .filter(|candidate| candidate.candidate.confidence >= min_confidence)
+        .collect::<Vec<_>>();
+    eligible.sort_by(|left, right| {
+        candidate_rank(right, auto_languages)
+            .total_cmp(&candidate_rank(left, auto_languages))
+            .then_with(|| {
+                right
+                    .candidate
+                    .confidence
+                    .total_cmp(&left.candidate.confidence)
+            })
+            .then_with(|| candidate_priority(left).cmp(&candidate_priority(right)))
+            .then_with(|| left.candidate.text.cmp(&right.candidate.text))
+    });
+    let selected = eligible.first()?.candidate.clone();
+    let mut alternatives = Vec::new();
+    for candidate in eligible.into_iter().skip(1) {
+        if candidate.candidate.text != selected.text
+            && !alternatives
+                .iter()
+                .any(|alternative: &TextAlternative| alternative.text == candidate.candidate.text)
+        {
+            alternatives.push(TextAlternative {
+                text: candidate.candidate.text,
+                confidence: candidate.candidate.confidence.clamp(0.0, 1.0),
+            });
         }
+    }
+    Some(recognized_region(box_, selected, alternatives))
+}
+
+fn candidate_rank(candidate: &RoutedCandidate, _auto_languages: bool) -> f32 {
+    let confidence = candidate.candidate.confidence;
+    let Some(script) = candidate.specialist else {
+        return confidence;
     };
-    let (selected, alternative) = if use_specialist {
-        (specialist.region, primary_candidate)
+    let script_fraction = script_fraction(&candidate.candidate.text, script);
+    if script_fraction > 0.0 {
+        confidence + 0.004 * script_fraction * script_fraction
     } else {
-        (primary.region, specialist_candidate)
-    };
-    MergedRegion {
-        region: selected,
-        alternative: alternative.map(|(text, confidence)| TextAlternative {
-            text: text.to_owned(),
-            confidence: confidence.clamp(0.0, 1.0),
-        }),
+        confidence - 0.08
+    }
+}
+
+fn script_fraction(text: &str, expected: SpecialistScript) -> f32 {
+    let mut expected_count = 0_u32;
+    let mut alphabetic_count = 0_u32;
+    for character in text.chars().filter(|character| character.is_alphabetic()) {
+        alphabetic_count += 1;
+        let matches = match expected {
+            SpecialistScript::Cyrillic => ('\u{0400}'..='\u{052f}').contains(&character),
+            SpecialistScript::Latin => {
+                character.is_ascii_alphabetic()
+                    || ('\u{00c0}'..='\u{024f}').contains(&character)
+                    || ('\u{1e00}'..='\u{1eff}').contains(&character)
+            }
+            SpecialistScript::Korean => {
+                ('\u{1100}'..='\u{11ff}').contains(&character)
+                    || ('\u{3130}'..='\u{318f}').contains(&character)
+                    || ('\u{ac00}'..='\u{d7af}').contains(&character)
+            }
+        };
+        expected_count += u32::from(matches);
+    }
+    if alphabetic_count == 0 {
+        0.0
+    } else {
+        expected_count as f32 / alphabetic_count as f32
+    }
+}
+
+fn candidate_priority(candidate: &RoutedCandidate) -> u8 {
+    match candidate.specialist {
+        None => 0,
+        Some(SpecialistScript::Latin) => 1,
+        Some(SpecialistScript::Cyrillic) => 2,
+        Some(SpecialistScript::Korean) => 3,
     }
 }
 
@@ -1710,12 +1963,6 @@ fn contains_script(text: &str, script: SpecialistScript) -> bool {
         SpecialistScript::Latin => contains_latin(text),
         SpecialistScript::Korean => contains_korean(text),
     }
-}
-
-fn candidate(region: &OarTextRegion) -> Option<(&str, f32)> {
-    region
-        .text_with_confidence()
-        .filter(|(text, _)| !text.trim().is_empty())
 }
 
 fn contains_cyrillic(text: &str) -> bool {
@@ -1836,6 +2083,101 @@ fn quad_from_box(box_: &BoundingBox, width: u32, height: u32) -> Option<Quad> {
         .then(|| Quad::from_rect(min_x, min_y, max_x - min_x, max_y - min_y))
 }
 
+fn candidate_word_boxes(
+    line_box: &BoundingBox,
+    candidate: &RecognizedCandidate,
+) -> Vec<BoundingBox> {
+    let characters = candidate.text.chars().collect::<Vec<_>>();
+    if characters.is_empty() {
+        return Vec::new();
+    }
+    let centers = if candidate.char_columns.len() == characters.len()
+        && candidate.sequence_length > 0
+        && candidate.batch_max_ratio > f32::EPSILON
+    {
+        let effective_columns =
+            candidate.sequence_length as f32 * (candidate.crop_ratio / candidate.batch_max_ratio);
+        if effective_columns <= f32::EPSILON {
+            return Vec::new();
+        }
+        candidate
+            .char_columns
+            .iter()
+            .map(|column| ((*column as f32 + 0.5) / effective_columns).clamp(0.0, 1.0))
+            .collect::<Vec<_>>()
+    } else if candidate.char_positions.len() == characters.len() {
+        candidate
+            .char_positions
+            .iter()
+            .map(|position| position.clamp(0.0, 1.0))
+            .collect::<Vec<_>>()
+    } else {
+        return Vec::new();
+    };
+
+    let mut word_boxes = Vec::new();
+    let mut word_start = None;
+    for (index, character) in characters.iter().enumerate() {
+        if character.is_whitespace() {
+            if let Some(start) = word_start.take() {
+                word_boxes.push(character_range_box(line_box, &centers, start, index - 1));
+            }
+        } else if word_start.is_none() {
+            word_start = Some(index);
+        }
+    }
+    if let Some(start) = word_start {
+        word_boxes.push(character_range_box(
+            line_box,
+            &centers,
+            start,
+            characters.len() - 1,
+        ));
+    }
+    word_boxes
+}
+
+fn character_range_box(
+    line_box: &BoundingBox,
+    centers: &[f32],
+    start: usize,
+    end: usize,
+) -> BoundingBox {
+    let left = if start == 0 {
+        0.0
+    } else {
+        (centers[start - 1] + centers[start]) / 2.0
+    };
+    let right = if end + 1 >= centers.len() {
+        1.0
+    } else {
+        (centers[end] + centers[end + 1]) / 2.0
+    };
+    slice_line_box(line_box, left.clamp(0.0, 1.0), right.clamp(0.0, 1.0))
+}
+
+fn slice_line_box(line_box: &BoundingBox, left: f32, right: f32) -> BoundingBox {
+    if line_box.points.len() < 4 {
+        let Some((min_x, min_y, max_x, max_y)) = box_bounds(line_box) else {
+            return BoundingBox::new(Vec::new());
+        };
+        let width = max_x - min_x;
+        return BoundingBox::from_coords(min_x + left * width, min_y, min_x + right * width, max_y);
+    }
+    let top_left = interpolate_point(&line_box.points[0], &line_box.points[1], left);
+    let top_right = interpolate_point(&line_box.points[0], &line_box.points[1], right);
+    let bottom_right = interpolate_point(&line_box.points[3], &line_box.points[2], right);
+    let bottom_left = interpolate_point(&line_box.points[3], &line_box.points[2], left);
+    BoundingBox::new(vec![top_left, top_right, bottom_right, bottom_left])
+}
+
+fn interpolate_point(left: &OarPoint, right: &OarPoint, position: f32) -> OarPoint {
+    OarPoint::new(
+        left.x + (right.x - left.x) * position,
+        left.y + (right.y - left.y) * position,
+    )
+}
+
 fn build_words(
     line_id: &str,
     region: &OarTextRegion,
@@ -1866,6 +2208,27 @@ fn build_words(
         .collect()
 }
 
+fn retryable_init<'a, T>(
+    cache: &'a OnceLock<T>,
+    initialization: &Mutex<()>,
+    build: impl FnOnce() -> Result<T>,
+) -> Result<&'a T> {
+    if let Some(value) = cache.get() {
+        return Ok(value);
+    }
+    let _guard = initialization
+        .lock()
+        .map_err(|_| backend_error("model initialization lock was poisoned"))?;
+    if let Some(value) = cache.get() {
+        return Ok(value);
+    }
+    let value = build()?;
+    let _ = cache.set(value);
+    cache
+        .get()
+        .ok_or_else(|| backend_error("model initialization failed"))
+}
+
 fn backend_error(message: impl Into<String>) -> Error {
     Error::Backend {
         backend: "onnxruntime",
@@ -1893,6 +2256,11 @@ mod tests {
                 .expect("auto language mode must resolve")
                 .is_empty()
         );
+        assert!(
+            resolve_languages(&["AUTO".to_owned()])
+                .expect("the explicit auto alias must resolve")
+                .is_empty()
+        );
     }
 
     #[test]
@@ -1905,6 +2273,8 @@ mod tests {
         assert_eq!(script_tag("本地文字"), Some("Hani"));
         assert_eq!(script_tag("ひらがな漢字"), Some("Jpan"));
         assert!(contains_script("Příliš Straße", SpecialistScript::Latin));
+        assert_eq!(script_fraction("Нello", SpecialistScript::Cyrillic), 0.2);
+        assert_eq!(script_fraction("Привет", SpecialistScript::Cyrillic), 1.0);
         assert!(!contains_script("本地文字", SpecialistScript::Latin));
         assert!(profile_languages(QualityMode::Balanced).contains(&"ko".to_owned()));
         assert!(LATIN_LANGUAGES.contains(&"cs"));
@@ -1980,6 +2350,139 @@ mod tests {
         assert_eq!(recommended_threads(1), 1);
         assert_eq!(recommended_threads(4), 4);
         assert_eq!(recommended_threads(16), 8);
+    }
+
+    #[test]
+    fn candidate_selection_is_order_independent_and_keeps_valid_primary() {
+        let box_ = BoundingBox::from_coords(0.0, 0.0, 100.0, 20.0);
+        let primary = Some(vec![Some(RecognizedCandidate {
+            text: "Hello".to_owned(),
+            confidence: 0.95,
+            ..RecognizedCandidate::default()
+        })]);
+        let cyrillic = vec![Some(RecognizedCandidate {
+            text: "Нello".to_owned(),
+            confidence: 0.78,
+            ..RecognizedCandidate::default()
+        })];
+        let korean = vec![Some(RecognizedCandidate {
+            text: "Hello".to_owned(),
+            confidence: 0.81,
+            ..RecognizedCandidate::default()
+        })];
+        let first = merge_recognized_regions(
+            std::slice::from_ref(&box_),
+            primary.clone(),
+            &[
+                (SpecialistScript::Cyrillic, cyrillic.clone()),
+                (SpecialistScript::Korean, korean.clone()),
+            ],
+            true,
+            0.8,
+        );
+        let second = merge_recognized_regions(
+            &[box_],
+            primary,
+            &[
+                (SpecialistScript::Korean, korean),
+                (SpecialistScript::Cyrillic, cyrillic),
+            ],
+            true,
+            0.8,
+        );
+
+        assert_eq!(first.len(), 1);
+        assert_eq!(second.len(), 1);
+        assert_eq!(first[0].region.text_with_confidence().unwrap().0, "Hello");
+        assert_eq!(second[0].region.text_with_confidence().unwrap().0, "Hello");
+    }
+
+    #[test]
+    fn candidate_selection_filters_before_ranking() {
+        let regions = merge_recognized_regions(
+            &[BoundingBox::from_coords(0.0, 0.0, 100.0, 20.0)],
+            Some(vec![Some(RecognizedCandidate {
+                text: "strong".to_owned(),
+                confidence: 0.91,
+                ..RecognizedCandidate::default()
+            })]),
+            &[(
+                SpecialistScript::Cyrillic,
+                vec![Some(RecognizedCandidate {
+                    text: "слабый".to_owned(),
+                    confidence: 0.79,
+                    ..RecognizedCandidate::default()
+                })],
+            )],
+            true,
+            0.8,
+        );
+
+        assert_eq!(
+            regions[0].region.text_with_confidence().unwrap().0,
+            "strong"
+        );
+    }
+
+    #[test]
+    fn adaptive_tiles_cover_long_images_with_overlap() {
+        assert!(!should_tile_image(1_280, 1_920, 1_280));
+        assert!(should_tile_image(1_080, 2_400, 1_280));
+        assert_eq!(tile_offsets(2_400, 1_280), vec![0, 1_120]);
+        assert_eq!(tile_offsets(4_000, 1_280), vec![0, 906, 1_813, 2_720]);
+    }
+
+    #[test]
+    fn tiled_detection_deduplicates_overlap_without_merging_lines() {
+        let boxes = deduplicate_boxes(vec![
+            BoundingBox::from_coords(10.0, 10.0, 100.0, 30.0),
+            BoundingBox::from_coords(11.0, 10.0, 101.0, 30.0),
+            BoundingBox::from_coords(10.0, 35.0, 100.0, 55.0),
+        ]);
+
+        assert_eq!(boxes.len(), 2);
+    }
+
+    #[test]
+    fn failed_initialization_can_be_retried() {
+        let cache = OnceLock::new();
+        let initialization = Mutex::new(());
+        let first = retryable_init(&cache, &initialization, || -> Result<u32> {
+            Err(backend_error("temporary failure"))
+        });
+        assert!(first.is_err());
+
+        let value = retryable_init(&cache, &initialization, || Ok(42))
+            .expect("a later initialization attempt must succeed");
+
+        assert_eq!(*value, 42);
+    }
+
+    #[test]
+    fn recognition_positions_produce_word_boxes() {
+        let line_box = BoundingBox::new(vec![
+            OarPoint::new(10.0, 20.0),
+            OarPoint::new(210.0, 40.0),
+            OarPoint::new(205.0, 80.0),
+            OarPoint::new(5.0, 60.0),
+        ]);
+        let boxes = candidate_word_boxes(
+            &line_box,
+            &RecognizedCandidate {
+                text: "two words".to_owned(),
+                char_columns: (0..9).collect(),
+                sequence_length: 10,
+                crop_ratio: 4.0,
+                batch_max_ratio: 4.0,
+                ..RecognizedCandidate::default()
+            },
+        );
+
+        assert_eq!(boxes.len(), 2);
+        assert!(box_area(&boxes[0]) > 0.0);
+        assert!(box_area(&boxes[1]) > 0.0);
+        assert!(box_bounds(&boxes[0]).unwrap().2 <= box_bounds(&boxes[1]).unwrap().0);
+        assert!(boxes[0].points[0].y < boxes[0].points[1].y);
     }
 
     #[test]

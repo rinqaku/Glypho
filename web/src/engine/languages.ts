@@ -87,10 +87,72 @@ export function containsHan(text: string): boolean { return /[\u3400-\u9fff]/u.t
 
 export type ScriptKind = 'latin' | 'cyrillic' | 'korean';
 
+export interface TextCandidate {
+  text: string;
+  confidence: number;
+  alternative?: { text: string; confidence: number };
+}
+
+export interface SpecialistCandidate {
+  candidate: TextCandidate | undefined;
+  script: ScriptKind;
+}
+
 export function containsScript(text: string, script: ScriptKind): boolean {
   if (script === 'cyrillic') return containsCyrillic(text);
   if (script === 'korean') return containsKorean(text);
   return containsLatin(text);
+}
+
+export function selectCandidateSet(
+  primary: TextCandidate | undefined,
+  specialists: SpecialistCandidate[],
+  minConfidence: number,
+): TextCandidate | undefined {
+  const candidates = [
+    ...(primary ? [{ candidate: primary, script: undefined }] : []),
+    ...specialists.filter((entry) => entry.candidate),
+  ].filter((entry) => entry.candidate.confidence >= minConfidence);
+  candidates.sort((left, right) => {
+    const rank = candidateRank(right.candidate, right.script) - candidateRank(left.candidate, left.script);
+    if (rank !== 0) return rank;
+    const confidence = right.candidate.confidence - left.candidate.confidence;
+    if (confidence !== 0) return confidence;
+    const priority = scriptPriority(left.script) - scriptPriority(right.script);
+    if (priority !== 0) return priority;
+    return left.candidate.text.localeCompare(right.candidate.text);
+  });
+  const selected = candidates[0]?.candidate;
+  if (!selected) return undefined;
+  const alternative = candidates
+    .slice(1)
+    .map((entry) => entry.candidate)
+    .find((candidate) => candidate.text !== selected.text);
+  return {
+    ...selected,
+    alternative: alternative
+      ? { text: alternative.text, confidence: alternative.confidence }
+      : undefined,
+  };
+}
+
+function candidateRank(candidate: TextCandidate, script: ScriptKind | undefined): number {
+  if (!script) return candidate.confidence;
+  const fraction = scriptFraction(candidate.text, script);
+  return candidate.confidence + (fraction > 0 ? 0.004 * fraction * fraction : -0.08);
+}
+
+function scriptFraction(text: string, expected: ScriptKind): number {
+  const letters = [...text].filter((character) => /\p{L}/u.test(character));
+  if (!letters.length) return 0;
+  return letters.filter((character) => containsScript(character, expected)).length / letters.length;
+}
+
+function scriptPriority(script: ScriptKind | undefined): number {
+  if (!script) return 0;
+  if (script === 'latin') return 1;
+  if (script === 'cyrillic') return 2;
+  return 3;
 }
 
 export function scriptTag(text: string): string | undefined {

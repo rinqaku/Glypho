@@ -38,6 +38,32 @@ try {
   assert.equal(languages.scriptTag('안녕하세요'), 'Kore');
   assert.equal(languages.scriptTag('日本語かな'), 'Jpan');
   assert.throws(() => languages.validateProfileLanguages('fast', ['ja']), /Japanese/);
+  const primary = { text: 'Hello', confidence: 0.95 };
+  const weakSpecialist = { text: 'Нello', confidence: 0.78 };
+  assert.deepEqual(
+    languages.selectCandidateSet(
+      primary,
+      [{ script: 'cyrillic', candidate: weakSpecialist }],
+      0.8,
+    ),
+    { ...primary, alternative: undefined },
+  );
+  const routes = [
+    { script: 'korean', candidate: { text: 'Hello', confidence: 0.81 } },
+    { script: 'cyrillic', candidate: weakSpecialist },
+  ];
+  assert.deepEqual(
+    languages.selectCandidateSet(primary, routes, 0.8),
+    languages.selectCandidateSet(primary, [...routes].reverse(), 0.8),
+  );
+  assert.equal(
+    languages.selectCandidateSet(
+      primary,
+      [{ script: 'cyrillic', candidate: { text: 'Нello', confidence: 0.94 } }],
+      0.8,
+    ).text,
+    'Hello',
+  );
 
   const angle = Math.PI / 7;
   const cos = Math.cos(angle);
@@ -74,7 +100,7 @@ try {
   ]);
   assert.deepEqual(sorted.map((item) => item.id), ['a', 'b', 'c']);
 
-  console.log('Glypho Web core tests: 11 assertions passed.');
+  console.log('Glypho Web core tests: 14 assertions passed.');
 } finally {
   rmSync(temp, { recursive: true, force: true });
 }

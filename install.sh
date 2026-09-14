@@ -24,6 +24,11 @@ case "$(uname -m)" in
     ;;
 esac
 
+if [ "$platform-$architecture" = darwin-x64 ]; then
+  printf '%s\n' 'glypho: macOS Intel is not currently distributed; build from source to use this platform' >&2
+  exit 1
+fi
+
 asset="glypho-ocr-$platform-$architecture.tar.gz"
 if [ "$version" = latest ]; then
   base_url="https://github.com/$repository/releases/latest/download"
@@ -65,7 +70,9 @@ fi
 
 tar -xzf "$temporary/$asset" -C "$temporary"
 mkdir -p -- "$install_dir"
-install -m 0755 "$temporary/glypho-ocr-$platform-$architecture/bin/glypho" "$install_dir/glypho"
+for source in "$temporary/glypho-ocr-$platform-$architecture"/bin/*; do
+  install -m 0755 "$source" "$install_dir/$(basename "$source")"
+done
 
 printf 'Installed glypho to %s/glypho\n' "$install_dir"
 case ":$PATH:" in

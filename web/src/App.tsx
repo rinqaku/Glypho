@@ -12,6 +12,7 @@ import { ProfileSwitch } from './components/ProfileSwitch';
 import { ResultPanel } from './components/ResultPanel';
 import { GlyphoWebClient, inspectImage } from './engine/client';
 import type { RuntimeMode } from './engine/ocr';
+import { recognizerPlan } from './engine/languages';
 import { detectorFor, modelBytes, primaryRecognizerFor, type ModelName, type Quality } from './engine/models';
 import type { ModelState, OcrResult, ProgressEvent } from './engine/types';
 
@@ -64,6 +65,7 @@ export default function App() {
   const [error, setError] = useState<string>();
   const [dragOverlay, setDragOverlay] = useState(false);
   const generation = useRef(0);
+  const fileGeneration = useRef(0);
   const dragDepth = useRef(0);
 
   const languages = useMemo(() => languageText
@@ -72,13 +74,28 @@ export default function App() {
     .filter(Boolean), [languageText]);
 
   const visibleModels = useMemo<ModelName[]>(() => {
-    const unique = new Set<ModelName>([
-      detectorFor(quality),
-      primaryRecognizerFor(quality),
-      ...SPECIALISTS,
-    ]);
+    let plan;
+    try {
+      plan = recognizerPlan(quality, languages);
+    } catch {
+      return [detectorFor(quality), primaryRecognizerFor(quality)];
+    }
+    const primary = plan.primary
+      ? primaryRecognizerFor(quality)
+      : plan.latin
+        ? 'v5-latin-rec'
+        : plan.cyrillic
+          ? 'v5-eslav-rec'
+          : 'v5-korean-rec';
+    const unique = new Set<ModelName>([detectorFor(quality), primary]);
+    if (languages.length === 0) SPECIALISTS.forEach((model) => unique.add(model));
+    else {
+      if (plan.primary && plan.latin) unique.add('v5-latin-rec');
+      if (plan.primary && plan.cyrillic) unique.add('v5-eslav-rec');
+      if (plan.primary && plan.korean) unique.add('v5-korean-rec');
+    }
     return [...unique];
-  }, [quality]);
+  }, [quality, languages]);
 
   const modelBootProgress = useMemo(() => {
     let loaded = 0;
@@ -156,16 +173,22 @@ export default function App() {
   useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }, [previewUrl]);
 
   const chooseFile = async (next: File) => {
+    const id = ++fileGeneration.current;
     try {
       const dimensions = await inspectImage(next);
+      if (id !== fileGeneration.current) return;
       const url = URL.createObjectURL(next);
-      setPreviewUrl(url);
+      setPreviewUrl((previous) => {
+        if (previous) URL.revokeObjectURL(previous);
+        return url;
+      });
       setFile(next);
       setResult(undefined);
       setSelectedLine(undefined);
       setError(undefined);
       setImageSize(dimensions);
     } catch (cause) {
+      if (id !== fileGeneration.current) return;
       setError(readableError(cause));
       setStatus('Image could not be opened');
       setImageSize(undefined);
@@ -241,6 +264,7 @@ export default function App() {
 
   const recognize = async () => {
     if (!file || !engineReady || busy) return;
+    const id = fileGeneration.current;
     setBusy(true);
     setResult(undefined);
     setSelectedLine(undefined);
@@ -249,12 +273,14 @@ export default function App() {
     setProgress(0.02);
     try {
       const output = await client.current!.recognize(file);
+      if (id !== fileGeneration.current) return;
       setResult(output);
       setProvider(output.provider);
       setWasmThreads(output.wasmThreads);
       setStatus(`Done · ${output.lines.length} text region${output.lines.length === 1 ? '' : 's'}`);
       setProgress(1);
     } catch (cause) {
+      if (id !== fileGeneration.current) return;
       const message = readableError(cause);
       setError(message);
       setStatus('Recognition failed');

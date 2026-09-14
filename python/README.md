@@ -30,7 +30,7 @@ The package name is `glypho-ocr`; import it as `glypho`:
 from glypho import Glypho
 ```
 
-Prebuilt wheels for `0.1.0` are published for:
+Prebuilt wheels for `0.2.0` are published for:
 
 | OS | Architectures |
 | --- | --- |
@@ -38,7 +38,7 @@ Prebuilt wheels for `0.1.0` are published for:
 | macOS | Apple Silicon (ARM64) |
 | Windows | x64, ARM64 |
 
-Intel macOS is not included in the `0.1.0` prebuilt-wheel matrix. On targets without a matching wheel, `pip` may fall back to the source distribution, which requires Rust/Cargo and is not covered by the prebuilt release matrix.
+Intel macOS is not included in the `0.2.0` prebuilt-wheel matrix. On targets without a matching wheel, `pip` may fall back to the source distribution, which requires Rust/Cargo and is not covered by the prebuilt release matrix.
 
 ## 🚀 Quick start
 
@@ -66,6 +66,17 @@ document = ocr.recognize("mixed.png")
 ```
 
 Common BCP-47-style values such as `cs-CZ`, `de-DE`, `ko-KR`, `zh-Hans`, `jpn` and `rus` are normalized automatically.
+
+Encoded bytes, Pillow images and NumPy arrays can be recognized in memory through
+the same persistent native runtime:
+
+```python
+document = ocr.recognize(image_bytes, file_name="capture.png")
+document = ocr.recognize(pillow_image, file_name="capture.png")
+document = ocr.recognize(rgb_array, file_name="frame.png")
+```
+
+Pillow remains optional and is only needed for Pillow/NumPy inputs.
 
 ## ⚙️ Options
 
@@ -174,7 +185,7 @@ auto | cpu | cuda | coreml | openvino
 
 Provider availability depends on the wheel, platform and host runtime. `device="auto"` probes available accelerators and falls back to CPU when necessary; `info()` exposes the resolved device and fallback information.
 
-The `0.1.0` release builds are CUDA-aware on Linux/Windows x64 and CoreML-aware on macOS Apple Silicon. CPU remains the fallback path.
+The `0.2.0` release builds are CUDA-aware on Linux/Windows x64 and CoreML-aware on macOS Apple Silicon. CPU remains the fallback path.
 
 ## 🧩 CLI
 

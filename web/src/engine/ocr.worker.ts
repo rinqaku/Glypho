@@ -43,21 +43,21 @@ self.onmessage = async (message: MessageEvent<IncomingMessage>) => {
 
   if (payload.type === 'configure') {
     const myGeneration = ++generation;
-    const previous = engine;
-    engine = new WebOcr({ quality: payload.quality, languages: payload.languages, runtime: payload.runtime });
-    await previous?.close();
-    ready = engine.load((event) => {
-      if (myGeneration === generation) emitProgress(event);
-    });
-
     try {
+      const previous = engine;
+      const next = new WebOcr({ quality: payload.quality, languages: payload.languages, runtime: payload.runtime });
+      engine = next;
+      await previous?.close();
+      ready = next.load((event) => {
+        if (myGeneration === generation) emitProgress(event);
+      });
       await ready;
       if (myGeneration !== generation) return;
       self.postMessage({
         type: 'configured',
         id: payload.id,
-        provider: engine.provider,
-        wasmThreads: engine.wasmThreads,
+        provider: next.provider,
+        wasmThreads: next.wasmThreads,
       });
     } catch (error) {
       if (myGeneration !== generation) return;
@@ -68,6 +68,7 @@ self.onmessage = async (message: MessageEvent<IncomingMessage>) => {
 
   if (payload.type === 'recognize') {
     const active = engine;
+    const myGeneration = generation;
     if (!active) {
       payload.bitmap.close();
       self.postMessage({ type: 'error', id: payload.id, error: 'Glypho Web is not configured yet.' });
@@ -77,8 +78,10 @@ self.onmessage = async (message: MessageEvent<IncomingMessage>) => {
     try {
       await ready;
       const result = await active.recognize(payload.bitmap, emitProgress);
+      if (myGeneration !== generation || active !== engine) return;
       self.postMessage({ type: 'result', id: payload.id, result });
     } catch (error) {
+      if (myGeneration !== generation) return;
       self.postMessage({ type: 'error', id: payload.id, error: serializeError(error) });
     } finally {
       payload.bitmap.close();

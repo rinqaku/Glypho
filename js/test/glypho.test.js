@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { test } from 'node:test';
 import path from 'node:path';
@@ -75,4 +75,32 @@ test('defaults to automatic language routing', () => {
   const glypho = new Glypho();
 
   assert.deepEqual(glypho.languages, []);
+});
+
+test('does not start a worker for an already aborted request', async () => {
+  const glypho = new Glypho({ binary: '/definitely/missing/glypho' });
+  const controller = new AbortController();
+  controller.abort(new Error('cancelled before dispatch'));
+
+  await assert.rejects(
+    glypho.request({ method: 'info' }, { signal: controller.signal }),
+    /cancelled before dispatch/,
+  );
+  assert.equal(glypho.worker, undefined);
+});
+
+test('terminates a stuck worker after timeout', { skip: process.platform === 'win32' }, async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'glypho-node-timeout-'));
+  const binary = path.join(directory, 'glypho-stuck');
+  await writeFile(binary, '#!/bin/sh\nwhile read line; do :; done\n');
+  await chmod(binary, 0o700);
+  const glypho = new Glypho({ binary, timeoutMs: 50 });
+
+  try {
+    await assert.rejects(glypho.info(), /timed out after 50 ms/);
+    assert.equal(glypho.worker, undefined);
+  } finally {
+    await glypho.close();
+    await rm(directory, { recursive: true, force: true });
+  }
 });

@@ -29,6 +29,9 @@ pub enum Error {
         stream: String,
         limit_bytes: usize,
     },
+    RecognitionTimedOut {
+        milliseconds: u64,
+    },
     Serialization(serde_json::Error),
     UnsupportedLanguage {
         requested: Vec<String>,
@@ -84,6 +87,9 @@ impl fmt::Display for Error {
                 formatter,
                 "{program} produced more than {limit_bytes} bytes on {stream}"
             ),
+            Self::RecognitionTimedOut { milliseconds } => {
+                write!(formatter, "recognition timed out after {milliseconds}ms")
+            }
             Self::Serialization(error) => write!(formatter, "invalid JSON: {error}"),
             Self::UnsupportedLanguage {
                 requested,

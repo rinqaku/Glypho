@@ -47,6 +47,21 @@ for path in Path("images").glob("*.png"):
     print(path.name, document.text)
 ```
 
+The native API also accepts encoded bytes, Pillow images and NumPy arrays without
+creating a temporary image file:
+
+```python
+from pathlib import Path
+from PIL import Image
+
+ocr.recognize(Path("image.png").read_bytes(), file_name="image.png")
+ocr.recognize(Image.open("image.png"), file_name="image.png")
+ocr.recognize(rgb_array, file_name="frame.png")
+```
+
+Pillow is only required when passing Pillow/NumPy objects; encoded `bytes` have no
+additional dependency.
+
 ## Warmup
 
 `warmup()` downloads and initializes the detector and recognizers required by the selected profile/languages.
@@ -126,6 +141,7 @@ Useful fields:
 - `document.text` — ordered plain text;
 - `document.lines` — detected lines;
 - `line.quad.points` — source-image coordinates;
+- `line.words` — word text and CTC-derived source-image coordinates;
 - `line.confidence` — recognition confidence;
 - `line.language` / `line.script` — routed metadata when known;
 - `line.alternatives` — rejected candidate when available;

@@ -32,6 +32,21 @@ class NativeLibrary:
             ctypes.c_size_t,
         ]
         self._library.glypho_recognize_json.restype = _Result
+        self._recognize_bytes_function = getattr(
+            self._library,
+            'glypho_recognize_bytes_json',
+            None,
+        )
+        if self._recognize_bytes_function is not None:
+            self._recognize_bytes_function.argtypes = [
+                ctypes.POINTER(ctypes.c_uint8),
+                ctypes.c_size_t,
+                ctypes.POINTER(ctypes.c_uint8),
+                ctypes.c_size_t,
+                ctypes.POINTER(ctypes.c_uint8),
+                ctypes.c_size_t,
+            ]
+            self._recognize_bytes_function.restype = _Result
         self._warmup_function = getattr(self._library, 'glypho_warmup_json', None)
         if self._warmup_function is not None:
             self._warmup_function.argtypes = [
@@ -56,6 +71,30 @@ class NativeLibrary:
         result = self._library.glypho_recognize_json(
             path_buffer,
             len(path_bytes),
+            options_buffer,
+            len(options_json),
+        )
+        return self._read_result(result)
+
+    def recognize_bytes(
+        self,
+        image: bytes,
+        file_name: str,
+        options_json: bytes,
+    ) -> bytes:
+        if self._recognize_bytes_function is None:
+            raise GlyphoNotFoundError(
+                'the Glypho native library is older than the Python package; reinstall it'
+            )
+        image_buffer = _bytes_buffer(image)
+        name = file_name.encode('utf-8')
+        name_buffer = _bytes_buffer(name)
+        options_buffer = _bytes_buffer(options_json)
+        result = self._recognize_bytes_function(
+            image_buffer,
+            len(image),
+            name_buffer,
+            len(name),
             options_buffer,
             len(options_json),
         )
@@ -102,9 +141,11 @@ def _find_library(path: str | os.PathLike[str] | None) -> Path:
         return _find_library(configured)
 
     name = _library_name()
-    bundled = Path(__file__).resolve().parent / '_libs' / name
-    if bundled.is_file():
-        return bundled
+    package = Path(__file__).resolve().parent
+    for directory in ('_native', '_libs'):
+        bundled = package / directory / name
+        if bundled.is_file():
+            return bundled
 
     root = Path(__file__).resolve().parents[2]
     for profile in ('release', 'debug'):

@@ -40,8 +40,8 @@ try {
 
     Expand-Archive -Path $archive -DestinationPath $temporary
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
-    $source = Join-Path $temporary "glypho-ocr-win32-$architecture\bin\glypho.exe"
-    Copy-Item -Force $source (Join-Path $InstallDir 'glypho.exe')
+    $source = Join-Path $temporary "glypho-ocr-win32-$architecture\bin\*"
+    Copy-Item -Force $source $InstallDir
 
     if (-not $env:GLYPHO_SKIP_PATH_UPDATE) {
         $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')

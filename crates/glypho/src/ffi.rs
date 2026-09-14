@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::ptr;
 use std::slice;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::thread;
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -103,6 +104,31 @@ pub unsafe extern "C" fn glypho_recognize_json(
 }
 
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn glypho_recognize_bytes_json(
+    image_data: *const u8,
+    image_len: usize,
+    file_name_data: *const u8,
+    file_name_len: usize,
+    options_data: *const u8,
+    options_len: usize,
+) -> GlyphoFfiResult {
+    match catch_unwind(AssertUnwindSafe(|| {
+        recognize_bytes_json(
+            image_data,
+            image_len,
+            file_name_data,
+            file_name_len,
+            options_data,
+            options_len,
+        )
+    })) {
+        Ok(Ok(json)) => ffi_result(STATUS_OK, json),
+        Ok(Err((status, message))) => ffi_result(status, message.into_bytes()),
+        Err(_) => ffi_result(STATUS_PANIC, b"Glypho panicked".to_vec()),
+    }
+}
+
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn glypho_warmup_json(
     options_data: *const u8,
     options_len: usize,
@@ -167,7 +193,12 @@ fn recognize_json(
         min_confidence: options.min_confidence,
     };
     let document = if let Some(config) = config {
-        recognize_with_cached_onnx(config, Path::new(path), &recognition)
+        recognize_with_cached_onnx(
+            config,
+            Path::new(path),
+            &recognition,
+            Duration::from_millis(options.timeout_ms),
+        )
     } else {
         Glypho::new(TesseractConfig {
             binary: PathBuf::from(options.tesseract),
@@ -177,6 +208,66 @@ fn recognize_json(
     }
     .map_err(|error| (STATUS_ERROR, error.to_string()))?;
 
+    serde_json::to_vec(&document).map_err(|error| (STATUS_ERROR, error.to_string()))
+}
+
+fn recognize_bytes_json(
+    image_data: *const u8,
+    image_len: usize,
+    file_name_data: *const u8,
+    file_name_len: usize,
+    options_data: *const u8,
+    options_len: usize,
+) -> std::result::Result<Vec<u8>, (i32, String)> {
+    let image = raw_bytes(image_data, image_len)?;
+    if image.is_empty() {
+        return Err((
+            STATUS_INVALID_INPUT,
+            "image bytes must not be empty".to_owned(),
+        ));
+    }
+    let file_name =
+        std::str::from_utf8(raw_bytes(file_name_data, file_name_len)?).map_err(|_| {
+            (
+                STATUS_INVALID_INPUT,
+                "file_name must be valid UTF-8".to_owned(),
+            )
+        })?;
+    if file_name.trim().is_empty() {
+        return Err((
+            STATUS_INVALID_INPUT,
+            "file_name must not be empty".to_owned(),
+        ));
+    }
+    let options = parse_options(options_data, options_len)?;
+    let Some(config) = onnx_config(&options) else {
+        return Err((
+            STATUS_INVALID_INPUT,
+            "in-memory recognition requires the native ONNX backend".to_owned(),
+        ));
+    };
+    if image.len() as u64 > config.max_file_bytes {
+        return Err((
+            STATUS_INVALID_INPUT,
+            format!(
+                "encoded image exceeds the {} byte limit",
+                config.max_file_bytes
+            ),
+        ));
+    }
+    let recognition = RecognitionOptions {
+        languages: options.languages,
+        segmentation: options.segmentation,
+        min_confidence: options.min_confidence,
+    };
+    let document = recognize_bytes_with_cached_onnx(
+        config,
+        image,
+        file_name,
+        &recognition,
+        Duration::from_millis(options.timeout_ms),
+    )
+    .map_err(|error| (STATUS_ERROR, error.to_string()))?;
     serde_json::to_vec(&document).map_err(|error| (STATUS_ERROR, error.to_string()))
 }
 
@@ -272,8 +363,52 @@ fn recognize_with_cached_onnx(
     config: OnnxConfig,
     path: &Path,
     recognition: &RecognitionOptions,
+    timeout: Duration,
 ) -> crate::Result<crate::Document> {
-    cached_onnx_engine(config)?.recognize(path, recognition)
+    let engine = cached_onnx_engine(config)?;
+    let path = path.to_owned();
+    let recognition = recognition.clone();
+    let (send, receive) = std::sync::mpsc::sync_channel(1);
+    thread::spawn(move || {
+        let _ = send.send(engine.recognize(path, &recognition));
+    });
+    match receive.recv_timeout(timeout) {
+        Ok(result) => result,
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(crate::Error::RecognitionTimedOut {
+            milliseconds: timeout.as_millis().min(u64::MAX as u128) as u64,
+        }),
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(crate::Error::Backend {
+            backend: "onnxruntime",
+            message: "recognition worker stopped unexpectedly".to_owned(),
+        }),
+    }
+}
+
+fn recognize_bytes_with_cached_onnx(
+    config: OnnxConfig,
+    image: &[u8],
+    file_name: &str,
+    recognition: &RecognitionOptions,
+    timeout: Duration,
+) -> crate::Result<crate::Document> {
+    let engine = cached_onnx_engine(config)?;
+    let image = image.to_vec();
+    let file_name = file_name.to_owned();
+    let recognition = recognition.clone();
+    let (send, receive) = std::sync::mpsc::sync_channel(1);
+    thread::spawn(move || {
+        let _ = send.send(engine.recognize_bytes(&image, file_name, &recognition));
+    });
+    match receive.recv_timeout(timeout) {
+        Ok(result) => result,
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(crate::Error::RecognitionTimedOut {
+            milliseconds: timeout.as_millis().min(u64::MAX as u128) as u64,
+        }),
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(crate::Error::Backend {
+            backend: "onnxruntime",
+            message: "recognition worker stopped unexpectedly".to_owned(),
+        }),
+    }
 }
 
 fn cached_onnx_engine(mut config: OnnxConfig) -> crate::Result<Arc<OnnxEngine>> {
@@ -392,6 +527,24 @@ mod tests {
         assert_eq!(result.status, STATUS_INVALID_INPUT);
         let message = unsafe { slice::from_raw_parts(result.body.data, result.body.len) };
         assert!(String::from_utf8_lossy(message).contains("native ONNX backend"));
+        unsafe { glypho_buffer_free(result.body) };
+    }
+
+    #[test]
+    fn in_memory_recognition_rejects_empty_images() {
+        let file_name = b"image.png";
+        let result = unsafe {
+            glypho_recognize_bytes_json(
+                ptr::null(),
+                0,
+                file_name.as_ptr(),
+                file_name.len(),
+                ptr::null(),
+                0,
+            )
+        };
+
+        assert_eq!(result.status, STATUS_INVALID_INPUT);
         unsafe { glypho_buffer_free(result.body) };
     }
 }

@@ -6,7 +6,8 @@ Glypho has one native OCR engine and several ways to call it. Rust is the source
 
 ```text
 image
-  → bounded decode
+  → bounded decode + EXIF orientation
+  → adaptive overlapping tiles for long images
   → text detector
   → quadrilateral regions
   → perspective crops
@@ -40,7 +41,7 @@ One detector pass is shared by all requested scripts.
 - Korean uses the Korean pack.
 - Chinese and Japanese use the unified recognizer.
 
-Mixed-language requests reuse the same perspective crops. A specialist is only initialized when the route needs it, and a rejected candidate can be preserved as an alternative.
+Mixed-language requests reuse the same perspective crops. A specialist is only initialized when the route needs it. Candidates are confidence-filtered and ranked as one order-independent set; rejected candidates can be preserved as alternatives.
 
 See [`LANGUAGES.md`](LANGUAGES.md) for the exact language list.
 
@@ -76,6 +77,8 @@ GLYPHO_MODELS
 
 Python keeps matching native engines in a bounded process-wide cache. Node keeps one local worker alive per `Glypho` instance, so ONNX sessions survive between calls.
 
+Failed model/session initialization is not cached permanently: a later call can retry after a transient download, filesystem or provider failure. Python deadlines return control at the C boundary; Node terminates and recreates a stuck worker so timed-out inference cannot block the following request.
+
 The browser does not spawn the native binary. It uses the same model family and result shape, but inference runs through ONNX Runtime Web with WebGPU or threaded WASM.
 
 ## 🧠 Sessions and memory
@@ -105,6 +108,7 @@ A result keeps:
 - confidence;
 - language/script metadata when the route is unambiguous;
 - optional alternative recognition candidates;
+- CTC-derived word coordinates when the recognizer exposes positions;
 - engine metadata and timing.
 
 The schema lives in [`../schemas/annotation.v1.schema.json`](../schemas/annotation.v1.schema.json).

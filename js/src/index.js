@@ -83,14 +83,27 @@ export class Glypho {
       return;
     }
     worker.stdin.end();
-    await new Promise((resolve) => worker.once('exit', resolve));
+    let forceClose;
+    await Promise.race([
+      new Promise((resolve) => worker.once('exit', resolve)),
+      new Promise((resolve) => {
+        forceClose = setTimeout(() => {
+          worker.kill();
+          resolve();
+        }, 2_000);
+      }),
+    ]);
+    clearTimeout(forceClose);
   }
 
   request(payload, options = {}) {
-    const worker = this.startWorker();
-    const id = this.nextId++;
     const timeoutMs = options.timeoutMs ?? this.timeoutMs;
     validateTimeout(timeoutMs);
+    if (options.signal?.aborted) {
+      return Promise.reject(options.signal.reason ?? new GlyphoError('Request aborted'));
+    }
+    const worker = this.startWorker();
+    const id = this.nextId++;
     return new Promise((resolve, reject) => {
       const finish = (error, value) => {
         const pending = this.pending.get(id);
@@ -107,10 +120,11 @@ export class Glypho {
         }
       };
       const abort = () => finish(options.signal?.reason ?? new GlyphoError('Request aborted'));
-      const timer = setTimeout(
-        () => finish(new GlyphoError(`Glypho timed out after ${timeoutMs} ms`)),
-        timeoutMs,
-      );
+      const timer = setTimeout(() => {
+        const error = new GlyphoError(`Glypho timed out after ${timeoutMs} ms`);
+        finish(error);
+        this.stopWorker(error);
+      }, timeoutMs);
       this.pending.set(id, { finish, timer, abort });
       options.signal?.addEventListener('abort', abort, { once: true });
       worker.stdin.write(`${JSON.stringify({ id, ...payload })}\n`, (error) => {
@@ -179,6 +193,15 @@ export class Glypho {
       pending.finish(error);
     }
   }
+
+  stopWorker(error) {
+    const worker = this.worker;
+    this.worker = undefined;
+    this.failPending(error);
+    if (worker && worker.exitCode === null) {
+      worker.kill();
+    }
+  }
 }
 
 export function resolveBinary(configured) {
@@ -215,7 +238,6 @@ export function resolveBinary(configured) {
 function platformPackage() {
   const suffix = {
     'darwin-arm64': 'darwin-arm64',
-    'darwin-x64': 'darwin-x64',
     'linux-arm64': 'linux-arm64',
     'linux-x64': 'linux-x64',
     'win32-arm64': 'win32-arm64',

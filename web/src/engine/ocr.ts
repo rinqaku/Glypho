@@ -5,7 +5,7 @@ import ortWasmModuleUrl from 'onnxruntime-web/ort-wasm-simd-threaded.asyncify.mj
 import { MODELS, QUALITY, detectorFor, primaryRecognizerFor, type Artifact, type ModelName, type Quality } from './models';
 import {
   containsScript, lineLanguage, normalizeLanguages, recognizerPlan, scriptTag,
-  validateProfileLanguages, type ScriptKind,
+  selectCandidateSet, validateProfileLanguages, type ScriptKind,
 } from './languages';
 import { distance, extractRegions, normalizeAngle, quadBounds, sortReadingOrder } from './geometry';
 import type { Candidate, OcrResult, ProgressEvent, Region } from './types';
@@ -63,13 +63,7 @@ export class WebOcr {
     this.wasmThreads = configureWasm();
     const detectorName = detectorFor(this.quality);
     const initialRecognizer = mainRecognizer(this.quality, recognizerPlan(this.quality, this.languages));
-    const modelNames = [...new Set<ModelName>([
-      detectorName,
-      initialRecognizer,
-      'v5-latin-rec',
-      'v5-eslav-rec',
-      'v5-korean-rec',
-    ])];
+    const modelNames = [...new Set<ModelName>([detectorName, initialRecognizer])];
 
     progress({ phase: 'initializing', message: 'Preparing models…', progress: 0.02 });
 
@@ -271,8 +265,9 @@ export class WebOcr {
   private async recognizeRegions(image: BrowserImage, regions: Region[], progress: ProgressSink): Promise<Array<Candidate | undefined>> {
     const plan = recognizerPlan(this.quality, this.languages);
     const primaryName = mainRecognizer(this.quality, plan);
-    const primary = await this.recognizeWith(primaryName, image, regions, undefined, progress, 0.52, 0.68);
-    const selected = primary.map((candidate) => candidate && ({ ...candidate }));
+    const crops = new RecognitionCropCache(image, regions);
+    const primary = await this.recognizeWith(primaryName, crops, regions, undefined, progress, 0.52, 0.68);
+    const specialists: Array<[ScriptKind, Array<Candidate | undefined>]> = [];
 
     if (this.autoLanguages) {
       // Smart auto mode: the universal recognizer is authoritative when it is already
@@ -288,33 +283,33 @@ export class WebOcr {
       for (const [name, script, from, to] of stages) {
         const indices = autoSpecialistCropIndices(primary, regions.length, script);
         if (!indices.length) continue;
-        const specialist = await this.recognizeWith(name, image, regions, indices, progress, from, to);
-        mergeSpecialist(selected, specialist, script);
+        const specialist = await this.recognizeWith(name, crops, regions, indices, progress, from, to);
+        specialists.push([script, specialist]);
       }
-      return selected;
+      return mergeCandidates(primary, specialists, this.minConfidence);
     }
 
     if (plan.primary && plan.latin) {
-      const latin = await this.recognizeWith('v5-latin-rec', image, regions, undefined, progress, 0.68, 0.78);
-      mergeSpecialist(selected, latin, 'latin');
+      const latin = await this.recognizeWith('v5-latin-rec', crops, regions, undefined, progress, 0.68, 0.78);
+      specialists.push(['latin', latin]);
     }
     if (plan.cyrillic && primaryName !== 'v5-eslav-rec') {
       const indices = specialistCropIndices(primary, regions.length, 'cyrillic');
       if (indices.length) {
-        const cyrillic = await this.recognizeWith('v5-eslav-rec', image, regions, indices, progress, 0.78, 0.90);
-        mergeSpecialist(selected, cyrillic, 'cyrillic');
+        const cyrillic = await this.recognizeWith('v5-eslav-rec', crops, regions, indices, progress, 0.78, 0.90);
+        specialists.push(['cyrillic', cyrillic]);
       }
     }
     if (plan.korean && primaryName !== 'v5-korean-rec') {
-      const korean = await this.recognizeWith('v5-korean-rec', image, regions, undefined, progress, 0.90, 0.98);
-      mergeSpecialist(selected, korean, 'korean');
+      const korean = await this.recognizeWith('v5-korean-rec', crops, regions, undefined, progress, 0.90, 0.98);
+      specialists.push(['korean', korean]);
     }
-    return selected;
+    return mergeCandidates(primary, specialists, this.minConfidence);
   }
 
   private async recognizeWith(
     name: ModelName,
-    image: BrowserImage,
+    crops: RecognitionCropCache,
     regions: Region[],
     indices: number[] | undefined,
     progress: ProgressSink,
@@ -329,7 +324,7 @@ export class WebOcr {
     let completed = 0;
 
     for (const batch of batches) {
-      const input = recognitionTensor(image, regions, batch);
+      const input = recognitionTensor(crops, regions, batch);
       const output = await recognizer.session.run({ [recognizer.session.inputNames[0]]: input });
       const decoded = decodeBatch(output[recognizer.session.outputNames[0]], recognizer.dictionary);
       for (let offset = 0; offset < batch.length; offset += 1) {
@@ -629,7 +624,7 @@ function targetRecognitionWidth(region) {
   );
 }
 
-function recognitionTensor(image, regions, indices) {
+function recognitionTensor(crops, regions, indices) {
   // Match OAR/Paddle recognition preprocessing: [3,48,320] is the minimum
   // tensor shape; wider crops expand the dynamic batch width. Zero padding is
   // intentional because Paddle pads the already-normalized tensor with 0.0.
@@ -641,12 +636,42 @@ function recognitionTensor(image, regions, indices) {
   const data = new Float32Array(indices.length * plane * 3);
 
   indices.forEach((regionIndex, batch) => {
-    const region = regions[regionIndex];
-    const resizedWidth = Math.min(width, targetRecognitionContentWidth(region));
-    writePerspectiveCrop(data, batch, plane, width, image, region, resizedWidth);
+    const crop = crops.get(regionIndex);
+    for (let channel = 0; channel < 3; channel += 1) {
+      for (let y = 0; y < RECOGNITION_HEIGHT; y += 1) {
+        const source = channel * crop.plane + y * crop.width;
+        const target = (batch * 3 + channel) * plane + y * width;
+        data.set(crop.data.subarray(source, source + crop.width), target);
+      }
+    }
   });
 
   return new ort.Tensor('float32', data, [indices.length, 3, RECOGNITION_HEIGHT, width]);
+}
+
+class RecognitionCropCache {
+  private readonly cached = new Map<number, { data: Float32Array; width: number; plane: number }>();
+  private cachedBytes = 0;
+
+  constructor(
+    private readonly image: BrowserImage,
+    private readonly regions: Region[],
+  ) {}
+
+  get(index: number): { data: Float32Array; width: number; plane: number } {
+    const cached = this.cached.get(index);
+    if (cached) return cached;
+    const region = this.regions[index];
+    const width = targetRecognitionContentWidth(region);
+    const plane = width * RECOGNITION_HEIGHT;
+    const crop = { data: new Float32Array(plane * 3), width, plane };
+    writePerspectiveCrop(crop.data, 0, plane, width, this.image, region, width);
+    if (this.cachedBytes + crop.data.byteLength <= 64 * 1024 * 1024) {
+      this.cached.set(index, crop);
+      this.cachedBytes += crop.data.byteLength;
+    }
+    return crop;
+  }
 }
 
 function drawRotatedCrop(context, image, region, destinationWidth, destinationHeight) {
@@ -742,24 +767,26 @@ function writePerspectiveCrop(data, batch, plane, tensorWidth, image, region, de
     0, 0, sampledWidth, sampledHeight,
   );
   const pixels = sourceContext.getImageData(0, 0, sampledWidth, sampledHeight).data;
+  const transform = projectiveTransform(quad);
+  const rgb = new Float64Array(3);
 
   for (let y = 0; y < RECOGNITION_HEIGHT; y += 1) {
     const t = (y + 0.5) / RECOGNITION_HEIGHT;
     for (let x = 0; x < destinationWidth; x += 1) {
       const u = (x + 0.5) / destinationWidth;
-      const point = projectivePoint(quad, u, t);
+      const point = projectivePoint(transform, u, t);
       const localX = (point.x - sourceX) * sampleScale - 0.5;
       const localY = (point.y - sourceY) * sampleScale - 0.5;
-      const [red, green, blue] = bicubicRgb(pixels, sampledWidth, sampledHeight, localX, localY);
+      bicubicRgb(pixels, sampledWidth, sampledHeight, localX, localY, rgb);
       const target = y * tensorWidth + x;
-      data[(batch * 3) * plane + target] = blue / 127.5 - 1;
-      data[(batch * 3 + 1) * plane + target] = green / 127.5 - 1;
-      data[(batch * 3 + 2) * plane + target] = red / 127.5 - 1;
+      data[(batch * 3) * plane + target] = rgb[2] / 127.5 - 1;
+      data[(batch * 3 + 1) * plane + target] = rgb[1] / 127.5 - 1;
+      data[(batch * 3 + 2) * plane + target] = rgb[0] / 127.5 - 1;
     }
   }
 }
 
-function projectivePoint(quad, u, v) {
+function projectiveTransform(quad) {
   const [p0, p1, p2, p3] = quad;
   const dx1 = p1.x - p2.x;
   const dx2 = p3.x - p2.x;
@@ -780,6 +807,11 @@ function projectivePoint(quad, u, v) {
   const d = p1.y - p0.y + g * p1.y;
   const e = p3.y - p0.y + h * p3.y;
   const f = p0.y;
+  return { a, b, c, d, e, f, g, h };
+}
+
+function projectivePoint(transform, u, v) {
+  const { a, b, c, d, e, f, g, h } = transform;
   const z = g * u + h * v + 1;
   return { x: (a * u + b * v + c) / z, y: (d * u + e * v + f) / z };
 }
@@ -791,10 +823,10 @@ function cubicWeight(value) {
   return 0;
 }
 
-function bicubicRgb(pixels, width, height, x, y) {
+function bicubicRgb(pixels, width, height, x, y, result) {
   const baseX = Math.floor(x);
   const baseY = Math.floor(y);
-  const result = [0, 0, 0];
+  result.fill(0);
   let weightSum = 0;
   for (let oy = -1; oy <= 2; oy += 1) {
     const sy = clamp(baseY + oy, 0, height - 1);
@@ -814,7 +846,9 @@ function bicubicRgb(pixels, width, height, x, y) {
     result[1] /= weightSum;
     result[2] /= weightSum;
   }
-  return result.map((value) => clamp(value, 0, 255));
+  result[0] = clamp(result[0], 0, 255);
+  result[1] = clamp(result[1], 0, 255);
+  result[2] = clamp(result[2], 0, 255);
 }
 
 function decodeBatch(output, dictionary) {
@@ -852,7 +886,7 @@ function autoSpecialistCropIndices(primary, cropCount, script: ScriptKind) {
   const indices = [];
   for (let index = 0; index < cropCount; index += 1) {
     const candidate = primary[index];
-    if (!candidate || candidate.confidence < 0.90 || containsScript(candidate.text, script)) {
+    if (!candidate || candidate.confidence < 0.99 || containsScript(candidate.text, script)) {
       indices.push(index);
     }
   }
@@ -868,34 +902,16 @@ function specialistCropIndices(primary, cropCount, script: ScriptKind = 'cyrilli
   return indices;
 }
 
-function mergeSpecialist(selected, specialists, script: ScriptKind) {
-  for (let index = 0; index < selected.length; index += 1) {
-    const specialist = specialists[index];
-    if (!specialist) continue;
-    const primary = selected[index];
-    if (!primary) {
-      selected[index] = { ...specialist };
-      continue;
-    }
-    selected[index] = selectCandidate(primary, specialist, script);
-  }
-}
-
-export function selectCandidate(primary, specialist, script: ScriptKind) {
-  const containsExpectedScript = containsScript(specialist.text, script);
-  const useSpecialist = containsExpectedScript
-    ? specialist.confidence >= primary.confidence - 0.18
-    : specialist.confidence > primary.confidence + 0.08;
-  if (useSpecialist) {
-    return {
-      ...specialist,
-      alternative: { text: primary.text, confidence: primary.confidence },
-    };
-  }
-  return {
-    ...primary,
-    alternative: { text: specialist.text, confidence: specialist.confidence },
-  };
+function mergeCandidates(
+  primary: Array<Candidate | undefined>,
+  specialists: Array<[ScriptKind, Array<Candidate | undefined>]>,
+  minConfidence: number,
+): Array<Candidate | undefined> {
+  return primary.map((candidate, index) => selectCandidateSet(
+    candidate,
+    specialists.map(([script, values]) => ({ script, candidate: values[index] })),
+    minConfidence,
+  ));
 }
 
 function parseDictionary(config) {

@@ -6,8 +6,16 @@ from pathlib import Path
 
 def main() -> None:
     name = 'glypho.exe' if os.name == 'nt' else 'glypho'
-    binary = Path(__file__).resolve().parent / '_bin' / name
-    if not binary.is_file():
+    package = Path(__file__).resolve().parent
+    binary = next(
+        (
+            candidate
+            for candidate in (package / '_native' / name, package / '_bin' / name)
+            if candidate.is_file()
+        ),
+        None,
+    )
+    if binary is None:
         raise SystemExit('glypho: packaged native executable is missing; reinstall glypho-ocr')
     try:
         result = subprocess.run([os.fspath(binary), *sys.argv[1:]], check=False)

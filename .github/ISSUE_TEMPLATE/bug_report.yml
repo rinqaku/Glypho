@@ -10,7 +10,7 @@ body:
     id: version
     attributes:
       label: Glypho version
-      placeholder: 0.1.0
+      placeholder: 0.2.0
     validations:
       required: true
   - type: dropdown
@@ -45,4 +45,3 @@ body:
     attributes:
       label: Runtime information
       description: Paste sanitized output from `glypho info --pretty` or `Glypho.info()`.
-

@@ -117,7 +117,17 @@ jobs:
           python=/opt/python/cp310-cp310/bin/python
           "$python" -m pip install build==1.3.0 auditwheel==6.8.2
           "$python" -m build --wheel python
-          "$python" -m auditwheel repair python/dist/*.whl --plat '${{ matrix.wheel-platform }}' --wheel-dir release
+          auditwheel_args=(python/dist/*.whl --plat '${{ matrix.wheel-platform }}' --wheel-dir release)
+          if [[ '${{ matrix.features }}' == 'cuda' ]]; then
+            auditwheel_args+=(
+              --exclude libcublasLt.so.13
+              --exclude libcublas.so.13
+              --exclude libcurand.so.10
+              --exclude libcudart.so.13
+              --exclude libcuda.so.1
+            )
+          fi
+          "$python" -m auditwheel repair "${auditwheel_args[@]}"
           "$python" -m auditwheel show release/*.whl
           "$python" -m pip install --force-reinstall --no-deps release/*.whl
           GLYPHO_HOME="$RUNNER_TEMP/glypho" "$python" -c "from glypho import Glypho; g = Glypho(languages=('en',)); d = g.recognize('.github/fixtures/english.png'); assert d.text == 'The quick brown fox jumps over 13 lazy dogs.'; print(g.info())"
@@ -127,7 +137,10 @@ jobs:
         run: /opt/python/cp310-cp310/bin/python -m build --sdist python --outdir release
       - name: Stage npm platform package
         shell: bash
-        run: /opt/python/cp310-cp310/bin/python .github/tools/package_native.py '${{ matrix.platform }}' --target target/release
+        run: |
+          args=('${{ matrix.platform }}' --target target/release)
+          if [[ '${{ matrix.features }}' == 'cuda' ]]; then args+=(--require-cuda); fi
+          /opt/python/cp310-cp310/bin/python .github/tools/package_native.py "${args[@]}"
       - name: Pack npm platform package
         shell: bash
         run: |
@@ -139,7 +152,10 @@ jobs:
         run: bash .github/tools/smoke_npm.sh '${{ matrix.platform }}' release
       - name: Create CLI archive
         shell: bash
-        run: /opt/python/cp310-cp310/bin/python .github/tools/package_native.py '${{ matrix.platform }}' --target target/release --archive release
+        run: |
+          args=('${{ matrix.platform }}' --target target/release --archive release)
+          if [[ '${{ matrix.features }}' == 'cuda' ]]; then args+=(--require-cuda); fi
+          /opt/python/cp310-cp310/bin/python .github/tools/package_native.py "${args[@]}"
       - name: Test CLI installer
         shell: bash
         run: |
@@ -176,15 +192,6 @@ jobs:
       RUSTFLAGS: --remap-path-prefix=${{ github.workspace }}=/workspace --remap-path-prefix=${{ github.workspace }}/.gh-tmp=/tmp
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: Check out ONNX Runtime for Intel macOS
-        if: matrix.platform == 'darwin-x64'
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          repository: microsoft/onnxruntime
-          ref: v1.28.0
-          path: .onnxruntime
-          submodules: recursive
-          fetch-depth: 1
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
@@ -192,33 +199,6 @@ jobs:
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: '24'
-      - name: Build ONNX Runtime for Intel macOS
-        if: matrix.platform == 'darwin-x64'
-        shell: bash
-        run: |
-          .onnxruntime/build.sh \
-            --build_dir "$RUNNER_TEMP/onnxruntime" \
-            --config Release \
-            --parallel \
-            --skip_tests \
-            --use_coreml \
-            --cmake_extra_defines \
-              CMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
-              CMAKE_POLICY_VERSION_MINIMUM=3.5 \
-              onnxruntime_BUILD_UNIT_TESTS=OFF
-
-          ort_lib="$RUNNER_TEMP/onnxruntime/Release"
-
-          # re2 is declared EXCLUDE_FROM_ALL by ONNX Runtime. With unit tests
-          # disabled it is not pulled into the default build, but ort-sys' static
-          # linker still expects libre2.a to be present.
-          cmake --build "$ort_lib" --config Release --target re2 --parallel 4
-
-          test -f "$ort_lib/libonnxruntime_common.a"
-          test -f "$ort_lib/_deps/onnx-build/libonnx.a"
-          test -f "$ort_lib/_deps/onnx-build/libonnx_proto.a"
-          test -f "$ort_lib/_deps/re2-build/libre2.a"
-          echo "ORT_LIB_PATH=$ort_lib" >> "$GITHUB_ENV"
       - name: Build native runtime
         shell: bash
         run: |
@@ -238,7 +218,10 @@ jobs:
           cp python/dist/*.whl release/
       - name: Stage npm platform package
         shell: bash
-        run: python .github/tools/package_native.py '${{ matrix.platform }}' --target target/release
+        run: |
+          args=('${{ matrix.platform }}' --target target/release)
+          if [[ '${{ matrix.features }}' == 'cuda' ]]; then args+=(--require-cuda); fi
+          python .github/tools/package_native.py "${args[@]}"
       - name: Pack npm platform package
         shell: bash
         run: |
@@ -250,7 +233,10 @@ jobs:
         run: bash .github/tools/smoke_npm.sh '${{ matrix.platform }}' release
       - name: Create CLI archive
         shell: bash
-        run: python .github/tools/package_native.py '${{ matrix.platform }}' --target target/release --archive release
+        run: |
+          args=('${{ matrix.platform }}' --target target/release --archive release)
+          if [[ '${{ matrix.features }}' == 'cuda' ]]; then args+=(--require-cuda); fi
+          python .github/tools/package_native.py "${args[@]}"
       - name: Test macOS CLI installer
         if: startsWith(matrix.platform, 'darwin')
         shell: bash
