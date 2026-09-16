@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 
 const root = path.resolve(import.meta.dirname, '..');
 const temp = mkdtempSync(path.join(tmpdir(), 'glypho-web-test-'));
@@ -13,24 +13,27 @@ const tsc = existsSync(localTsc) ? localTsc : 'tsc';
 try {
   execFileSync(tsc, [
     '--target', 'ES2022',
-    '--module', 'CommonJS',
-    '--moduleResolution', 'Node',
+    '--module', 'ES2022',
+    '--moduleResolution', 'Bundler',
     '--rootDir', path.join(root, 'src', 'engine'),
     '--outDir', temp,
     '--skipLibCheck', 'true',
     '--strict', 'false',
+    '--ignoreConfig',
     path.join(root, 'src', 'engine', 'models.ts'),
     path.join(root, 'src', 'engine', 'types.ts'),
     path.join(root, 'src', 'engine', 'languages.ts'),
     path.join(root, 'src', 'engine', 'geometry.ts'),
   ], { stdio: 'inherit' });
-  writeFileSync(path.join(temp, 'package.json'), '{"type":"commonjs"}\n');
+  writeFileSync(path.join(temp, 'package.json'), '{"type":"module"}\n');
 
-  const require = createRequire(import.meta.url);
-  const languages = require(path.join(temp, 'languages.js'));
-  const geometry = require(path.join(temp, 'geometry.js'));
+  const languages = await import(pathToFileURL(path.join(temp, 'languages.js')));
+  const geometry = await import(pathToFileURL(path.join(temp, 'geometry.js')));
+  const models = await import(pathToFileURL(path.join(temp, 'models.js')));
 
   assert.deepEqual(languages.normalizeLanguages('EN, rus; ja'), ['en', 'ru', 'ja']);
+  assert.equal(models.detectorFor('balanced'), 'v6-small-det');
+  assert.equal(models.QUALITY.balanced.maxSide, 1280);
   assert.deepEqual(languages.recognizerPlan('balanced', []), {
     primary: true, latin: true, cyrillic: true, korean: true,
   });
@@ -86,7 +89,7 @@ try {
     { dims: [1, 1, height, width], data: heatmap },
     640,
     320,
-    { detectorThreshold: 0.3, boxThreshold: 0.6, unclipRatio: 1.5 },
+    models.QUALITY.balanced,
   );
   assert.equal(regions.length, 1);
   assert.ok(regions[0].width > 300);
@@ -100,7 +103,7 @@ try {
   ]);
   assert.deepEqual(sorted.map((item) => item.id), ['a', 'b', 'c']);
 
-  console.log('Glypho Web core tests: 14 assertions passed.');
+  console.log('Glypho Web core tests: 16 assertions passed.');
 } finally {
   rmSync(temp, { recursive: true, force: true });
 }

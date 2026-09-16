@@ -11,21 +11,17 @@
     "test": "node test/core.test.mjs"
   },
   "dependencies": {
-    "framer-motion": "12.23.12",
-    "lucide-react": "0.468.0",
+    "framer-motion": "13.2.0",
+    "lucide-react": "1.44.0",
     "onnxruntime-web": "1.29.0",
-    "react": "19.1.1",
-    "react-dom": "19.1.1"
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
   },
   "devDependencies": {
-    "@types/react": "19.1.10",
-    "@types/react-dom": "19.1.7",
-    "@vitejs/plugin-react": "6.0.0",
-    "typescript": "5.8.3",
-    "vite": "8.2.2"
-  },
-  "overrides": {
-    "motion-dom": "12.23.12",
-    "motion-utils": "12.23.6"
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "typescript": "7.0.2",
+    "vite": "8.3.0"
   }
 }

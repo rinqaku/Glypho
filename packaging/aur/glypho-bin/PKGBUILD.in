@@ -1,0 +1,41 @@
+# Maintainer: rinqaku <https://github.com/rinqaku>
+
+pkgname=glypho-bin
+pkgver=@VERSION@
+pkgrel=1
+pkgdesc='Fast multilingual OCR with a Rust core (prebuilt CLI)'
+arch=('x86_64' 'aarch64')
+url='https://github.com/rinqaku/Glypho'
+license=('Apache-2.0')
+depends=('glibc')
+provides=('glypho')
+conflicts=('glypho')
+options=('!strip')
+
+source_x86_64=("glypho-ocr-linux-x64-${pkgver}.tar.gz::https://github.com/rinqaku/Glypho/releases/download/v${pkgver}/glypho-ocr-linux-x64.tar.gz")
+source_aarch64=("glypho-ocr-linux-arm64-${pkgver}.tar.gz::https://github.com/rinqaku/Glypho/releases/download/v${pkgver}/glypho-ocr-linux-arm64.tar.gz")
+sha256sums_x86_64=('@SHA256_X86_64@')
+sha256sums_aarch64=('@SHA256_AARCH64@')
+
+package() {
+    local platform
+    case "$CARCH" in
+        x86_64) platform='linux-x64' ;;
+        aarch64) platform='linux-arm64' ;;
+        *) return 1 ;;
+    esac
+
+    local root="$srcdir/glypho-ocr-$platform"
+
+    # Keep the executable and ONNX Runtime provider sidecars together exactly as
+    # in the upstream release archive. A tiny launcher exposes it as /usr/bin/glypho.
+    install -d "$pkgdir/usr/lib/glypho" "$pkgdir/usr/bin"
+    cp -a "$root/bin/." "$pkgdir/usr/lib/glypho/"
+    chmod 0755 "$pkgdir/usr/lib/glypho/glypho"
+
+    cat > "$pkgdir/usr/bin/glypho" <<'SH'
+#!/bin/sh
+exec /usr/lib/glypho/glypho "$@"
+SH
+    chmod 0755 "$pkgdir/usr/bin/glypho"
+}

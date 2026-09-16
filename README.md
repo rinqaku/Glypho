@@ -27,6 +27,24 @@ Local by default, easy to embed, and available from Rust, Python, Node.js and th
   <a href="https://glypho.kaneki.cz"><strong>🌐 Try Glypho Web</strong></a>
 </p>
 
+## 🏆 ICDAR 2015 CPU benchmark
+
+> **#1 quality + #1 warmed latency in our internal comparison of 6 OCR SDKs.**
+> On all 500 ICDAR 2015 test images, Glypho Balanced reached **0.7129 Det. H**, **0.5972 E2E H**, **172 ms p50** and **232 ms p95** on an Intel Core i5-12600KF (CPU-only).
+
+| Engine | Det. H ↑ | E2E H ↑ | p50 ↓ | p95 ↓ |
+| --- | ---: | ---: | ---: | ---: |
+| **Glypho Balanced** | **0.7129** | **0.5972** | **172 ms** | **232 ms** |
+| ppu-paddle-ocr | 0.2025 | 0.0998 | 195 ms | 517 ms |
+| Tesseract 5 | 0.0697 | 0.0480 | 262 ms | 589 ms |
+| docTR | 0.5739 | 0.4107 | 728 ms | 1.08 s |
+| EasyOCR | 0.6061 | 0.2188 | 1.77 s | 2.02 s |
+| Surya Classic | 0.1687 | 0.1271 | 5.80 s | 14.33 s |
+
+In a separate **model-scale matched** Glypho vs PPU comparison, Glypho was **2.13×–2.65× faster at p50** and reached **3.55×–7.73× the E2E H-mean** across Tiny, Small and Medium model pairs.
+
+<sub>Internal SDK benchmark, not an official RRC leaderboard submission. Same dataset, machine and evaluator for all engines. [Methodology and full results →](docs/BENCHMARKS.md)</sub>
+
 Glypho is built for screenshots, photos, UI text and everyday OCR where you want **good accuracy without sending the image to a remote API**.
 
 The native engine is written in Rust and uses ONNX Runtime with PP-OCR models. Models are downloaded only when needed, verified with SHA-256 and cached locally. Warm sessions stay in memory, so repeated recognition does not pay startup cost every time.
@@ -46,6 +64,22 @@ The native engine is written in Rust and uses ONNX Runtime with PP-OCR models. M
 ---
 
 ## 📦 Installation
+
+### CLI — one command
+
+Linux / macOS:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rinqaku/Glypho/main/install.sh | sh
+```
+
+Windows PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/rinqaku/Glypho/main/install.ps1 | iex
+```
+
+The installer downloads the latest matching GitHub Release, verifies its SHA-256 checksum and installs the `glypho` CLI. Supported prebuilt targets are Linux x64/ARM64, macOS ARM64 and Windows x64/ARM64.
 
 ### Python
 
@@ -194,7 +228,7 @@ Glypho uses fixed model profiles instead of silently changing model combinations
 | Profile | Detector | Primary recognizer | Best for |
 | --- | --- | --- | --- |
 | `fast` | PP-OCRv6 Tiny | PP-OCRv6 Tiny | lowest latency / weaker devices |
-| `balanced` | PP-OCRv5 Mobile | PP-OCRv6 Small | default everyday OCR |
+| `balanced` | PP-OCRv6 Small | PP-OCRv6 Small | default everyday OCR |
 | `accurate` | PP-OCRv6 Small | PP-OCRv6 Small | small or difficult text |
 | `maximum` | PP-OCRv6 Medium | PP-OCRv6 Medium | accuracy-first workloads |
 

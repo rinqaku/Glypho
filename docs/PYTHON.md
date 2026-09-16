@@ -64,7 +64,7 @@ additional dependency.
 
 ## Warmup
 
-`warmup()` downloads and initializes the detector and recognizers required by the selected profile/languages.
+`warmup()` downloads and initializes the detector and recognizers required by the selected profile/languages. Independent native sessions initialize concurrently, then stay resident for later calls.
 
 ```python
 ocr.warmup(languages=["en", "ru"])

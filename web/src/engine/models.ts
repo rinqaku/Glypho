@@ -65,7 +65,7 @@ export const QUALITY = {
     maxSide: 960, batchSize: 16, widthBudget: 12_288,
   },
   balanced: {
-    label: 'Balanced', detectorThreshold: 0.30, boxThreshold: 0.60, unclipRatio: 1.50,
+    label: 'Balanced', detectorThreshold: 0.20, boxThreshold: 0.45, unclipRatio: 1.40,
     maxSide: 1280, batchSize: 8, widthBudget: 8_192,
   },
   accurate: {
@@ -82,9 +82,8 @@ export type QualityProfile = (typeof QUALITY)[Quality];
 
 export function detectorFor(quality: Quality): ModelName {
   if (quality === 'fast') return 'v6-tiny-det';
-  if (quality === 'accurate') return 'v6-small-det';
   if (quality === 'maximum') return 'v6-medium-det';
-  return 'v5-mobile-det';
+  return 'v6-small-det';
 }
 
 export function primaryRecognizerFor(quality: Quality): ModelName {

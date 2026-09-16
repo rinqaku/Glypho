@@ -12,5 +12,6 @@ Short technical notes for things that are too detailed for the main README.
 | [`PYTHON.md`](PYTHON.md) | Python API, warmup, reuse and errors |
 | [`HARDWARE.md`](HARDWARE.md) | CPU, CUDA, CoreML, OpenVINO, WebGPU and WASM |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | native pipeline, bindings and runtime boundaries |
+| [`BENCHMARKS.md`](BENCHMARKS.md) | ICDAR 2015 CPU benchmark methodology and results |
 
 The public API should stay simpler than these docs. If a detail is only useful while developing Glypho, keep it here instead of expanding the main README.

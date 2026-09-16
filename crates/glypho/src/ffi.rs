@@ -433,6 +433,7 @@ fn cached_onnx_engine(mut config: OnnxConfig) -> crate::Result<Arc<OnnxEngine>> 
     }
 
     let engine = Arc::new(OnnxEngine::new(config)?);
+    // Keep the FFI cache bounded; live clients retain evicted engines through Arc.
     if cache.len() >= MAX_CACHED_ONNX_ENGINES
         && let Some(evicted) = cache.keys().next().cloned()
     {

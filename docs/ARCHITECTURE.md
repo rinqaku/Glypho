@@ -25,7 +25,7 @@ The default backend uses ONNX Runtime through Rust. Tesseract is kept as an expl
 | Profile | Detector | Primary recognizer |
 | --- | --- | --- |
 | `fast` | PP-OCRv6 Tiny | PP-OCRv6 Tiny |
-| `balanced` | PP-OCRv5 Mobile | PP-OCRv6 Small |
+| `balanced` | PP-OCRv6 Small | PP-OCRv6 Small |
 | `accurate` | PP-OCRv6 Small | PP-OCRv6 Small |
 | `maximum` | PP-OCRv6 Medium | PP-OCRv6 Medium |
 
@@ -41,7 +41,7 @@ One detector pass is shared by all requested scripts.
 - Korean uses the Korean pack.
 - Chinese and Japanese use the unified recognizer.
 
-Mixed-language requests reuse the same perspective crops. A specialist is only initialized when the route needs it. Candidates are confidence-filtered and ranked as one order-independent set; rejected candidates can be preserved as alternatives.
+Mixed-language requests reuse the same perspective crops. Detector and primary recognizer sessions initialize concurrently; specialists remain lazy and start only when routing needs them. Candidates are confidence-filtered and ranked as one order-independent set; rejected candidates can be preserved as alternatives.
 
 See [`LANGUAGES.md`](LANGUAGES.md) for the exact language list.
 

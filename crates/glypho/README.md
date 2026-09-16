@@ -70,7 +70,7 @@ Set `GLYPHO_HOME` or `GLYPHO_MODELS` to use another location.
 | Profile | Detector | Primary recognizer | Use case |
 | --- | --- | --- | --- |
 | `Fast` | PP-OCRv6 Tiny | PP-OCRv6 Tiny | minimum latency |
-| `Balanced` | PP-OCRv5 Mobile | PP-OCRv6 Small | default OCR |
+| `Balanced` | PP-OCRv6 Small | PP-OCRv6 Small | default OCR |
 | `Accurate` | PP-OCRv6 Small | PP-OCRv6 Small | smaller / harder text |
 | `Maximum` | PP-OCRv6 Medium | PP-OCRv6 Medium | accuracy-first workloads |
 

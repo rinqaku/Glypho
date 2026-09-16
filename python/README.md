@@ -114,13 +114,15 @@ auto | single_block | single_line | sparse_text
 | Profile | Detector | Primary recognizer | Use case |
 | --- | --- | --- | --- |
 | `fast` | PP-OCRv6 Tiny | PP-OCRv6 Tiny | minimum latency |
-| `balanced` | PP-OCRv5 Mobile | PP-OCRv6 Small | default OCR |
+| `balanced` | PP-OCRv6 Small | PP-OCRv6 Small | default OCR |
 | `accurate` | PP-OCRv6 Small | PP-OCRv6 Small | smaller / harder text |
 | `maximum` | PP-OCRv6 Medium | PP-OCRv6 Medium | accuracy-first workloads |
 
 Glypho exposes 55 canonical language identifiers across Latin, Eastern Slavic, Chinese, Japanese and Korean routes.
 
 ## 🔥 Warm sessions
+
+Independent detector and recognizer sessions initialize concurrently and remain resident for later calls.
 
 For repeated OCR, create one `Glypho` instance and warm it before processing requests:
 

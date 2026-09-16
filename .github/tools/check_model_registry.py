@@ -9,7 +9,11 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def main() -> int:
     registry = json.loads((ROOT / '.github' / 'model-registry.json').read_text(encoding='utf-8'))
-    rust = (ROOT / 'crates' / 'glypho' / 'src' / 'onnx.rs').read_text(encoding='utf-8')
+    rust_directory = ROOT / 'crates' / 'glypho' / 'src' / 'onnx'
+    rust = '\n'.join(
+        path.read_text(encoding='utf-8')
+        for path in sorted(rust_directory.glob('*.rs'))
+    )
     web = (ROOT / 'web' / 'src' / 'engine' / 'models.ts').read_text(encoding='utf-8')
     models = {model['id']: model for model in registry['models']}
     selected = {

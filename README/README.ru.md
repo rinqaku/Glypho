@@ -27,6 +27,24 @@
   <a href="https://glypho.kaneki.cz"><strong>🌐 Открыть Glypho Web</strong></a>
 </p>
 
+## 🏆 CPU-бенчмарк ICDAR 2015
+
+> **№1 по качеству + №1 по прогретой задержке в нашем внутреннем сравнении 6 OCR SDK.**
+> На всех 500 тестовых изображениях ICDAR 2015 Glypho Balanced получил **0.7129 Det. H**, **0.5972 E2E H**, **172 мс p50** и **232 мс p95** на Intel Core i5-12600KF (только CPU).
+
+| Движок | Det. H ↑ | E2E H ↑ | p50 ↓ | p95 ↓ |
+| --- | ---: | ---: | ---: | ---: |
+| **Glypho Balanced** | **0.7129** | **0.5972** | **172 мс** | **232 мс** |
+| ppu-paddle-ocr | 0.2025 | 0.0998 | 195 мс | 517 мс |
+| Tesseract 5 | 0.0697 | 0.0480 | 262 мс | 589 мс |
+| docTR | 0.5739 | 0.4107 | 728 мс | 1.08 с |
+| EasyOCR | 0.6061 | 0.2188 | 1.77 с | 2.02 с |
+| Surya Classic | 0.1687 | 0.1271 | 5.80 с | 14.33 с |
+
+В отдельном сравнении Glypho и PPU с **сопоставимым размером моделей** Glypho оказался **в 2.13×–2.65× быстрее по p50** и достиг **3.55×–7.73× E2E H-mean** на парах Tiny, Small и Medium.
+
+<sub>Внутренний SDK-бенчмарк, не официальный результат RRC leaderboard. Для всех движков использованы одинаковые dataset, машина и evaluator. [Методика и полные результаты →](../docs/BENCHMARKS.md)</sub>
+
 Glypho сделан для скриншотов, фотографий, интерфейсов и обычного OCR, где хочется **хорошей точности без отправки картинки в чужой API**.
 
 Нативное ядро написано на Rust и использует ONNX Runtime вместе с PP-OCR. Модели скачиваются только когда нужны, проверяются через SHA-256 и кешируются локально. Прогретые detector/recognizer sessions остаются в памяти, поэтому повторное распознавание не платит за инициализацию заново.
@@ -46,6 +64,22 @@ Glypho сделан для скриншотов, фотографий, инте�
 ---
 
 ## 📦 Установка
+
+### CLI — одной командой
+
+Linux / macOS:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rinqaku/Glypho/main/install.sh | sh
+```
+
+Windows PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/rinqaku/Glypho/main/install.ps1 | iex
+```
+
+Скрипт скачивает подходящий архив из последнего GitHub Release, проверяет SHA-256 и устанавливает CLI `glypho`. Готовые сборки есть для Linux x64/ARM64, macOS ARM64 и Windows x64/ARM64.
 
 ### Python
 
@@ -194,7 +228,7 @@ Glypho использует фиксированные model profiles, чтоб�
 | Профиль | Detector | Основной recognizer | Для чего |
 | --- | --- | --- | --- |
 | `fast` | PP-OCRv6 Tiny | PP-OCRv6 Tiny | минимальная задержка / слабые устройства |
-| `balanced` | PP-OCRv5 Mobile | PP-OCRv6 Small | обычный OCR, профиль по умолчанию |
+| `balanced` | PP-OCRv6 Small | PP-OCRv6 Small | обычный OCR, профиль по умолчанию |
 | `accurate` | PP-OCRv6 Small | PP-OCRv6 Small | мелкий и сложный текст |
 | `maximum` | PP-OCRv6 Medium | PP-OCRv6 Medium | когда точность важнее скорости |
 

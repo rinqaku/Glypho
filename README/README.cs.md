@@ -27,6 +27,24 @@ Lokální ve výchozím nastavení, snadno vložitelné a dostupné z Rustu, Pyt
   <a href="https://glypho.kaneki.cz"><strong>🌐 Vyzkoušet Glypho Web</strong></a>
 </p>
 
+## 🏆 ICDAR 2015 CPU benchmark
+
+> **1. místo v kvalitě + 1. místo ve warm latenci v našem interním srovnání 6 OCR SDK.**
+> Na všech 500 testovacích obrázcích ICDAR 2015 dosáhlo Glypho Balanced **0.7129 Det. H**, **0.5972 E2E H**, **172 ms p50** a **232 ms p95** na Intel Core i5-12600KF (pouze CPU).
+
+| Engine | Det. H ↑ | E2E H ↑ | p50 ↓ | p95 ↓ |
+| --- | ---: | ---: | ---: | ---: |
+| **Glypho Balanced** | **0.7129** | **0.5972** | **172 ms** | **232 ms** |
+| ppu-paddle-ocr | 0.2025 | 0.0998 | 195 ms | 517 ms |
+| Tesseract 5 | 0.0697 | 0.0480 | 262 ms | 589 ms |
+| docTR | 0.5739 | 0.4107 | 728 ms | 1.08 s |
+| EasyOCR | 0.6061 | 0.2188 | 1.77 s | 2.02 s |
+| Surya Classic | 0.1687 | 0.1271 | 5.80 s | 14.33 s |
+
+V samostatném srovnání Glypho a PPU s **podobně velkými modely** bylo Glypho **2.13×–2.65× rychlejší v p50** a dosáhlo **3.55×–7.73× E2E H-mean** u dvojic Tiny, Small a Medium.
+
+<sub>Interní SDK benchmark, nikoli oficiální výsledek RRC leaderboardu. Všechny enginy používají stejný dataset, stroj a evaluator. [Metodika a kompletní výsledky →](../docs/BENCHMARKS.md)</sub>
+
 Glypho je určené pro screenshoty, fotografie, text v UI a běžné OCR, kde chceš **dobrou přesnost bez odesílání obrázku do vzdáleného API**.
 
 Nativní engine je napsaný v Rustu a používá ONNX Runtime s modely PP-OCR. Modely se stahují jen tehdy, když jsou potřeba, kontrolují se pomocí SHA-256 a ukládají se do lokální cache. Zahřáté detector/recognizer sessions zůstávají v paměti, takže další OCR nemusí znovu platit cenu za inicializaci.
@@ -46,6 +64,22 @@ Nativní engine je napsaný v Rustu a používá ONNX Runtime s modely PP-OCR. M
 ---
 
 ## 📦 Instalace
+
+### CLI — jedním příkazem
+
+Linux / macOS:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rinqaku/Glypho/main/install.sh | sh
+```
+
+Windows PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/rinqaku/Glypho/main/install.ps1 | iex
+```
+
+Instalátor stáhne odpovídající archiv z nejnovějšího GitHub Release, ověří SHA-256 a nainstaluje CLI `glypho`. Předpřipravené buildy jsou pro Linux x64/ARM64, macOS ARM64 a Windows x64/ARM64.
 
 ### Python
 
@@ -194,7 +228,7 @@ Glypho používá pevné kombinace modelů, takže se chování mezi releasy nem
 | Profil | Detector | Hlavní recognizer | Použití |
 | --- | --- | --- | --- |
 | `fast` | PP-OCRv6 Tiny | PP-OCRv6 Tiny | nejnižší latence / slabší zařízení |
-| `balanced` | PP-OCRv5 Mobile | PP-OCRv6 Small | výchozí běžné OCR |
+| `balanced` | PP-OCRv6 Small | PP-OCRv6 Small | výchozí běžné OCR |
 | `accurate` | PP-OCRv6 Small | PP-OCRv6 Small | malý nebo obtížný text |
 | `maximum` | PP-OCRv6 Medium | PP-OCRv6 Medium | když je přesnost důležitější než rychlost |
 

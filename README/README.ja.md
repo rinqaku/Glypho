@@ -27,6 +27,24 @@
   <a href="https://glypho.kaneki.cz"><strong>🌐 Glypho Web を試す</strong></a>
 </p>
 
+## 🏆 ICDAR 2015 CPU ベンチマーク
+
+> **内部比較した 6 つの OCR SDK の中で、品質とウォーム時レイテンシの両方で 1 位。**
+> ICDAR 2015 の全 500 テスト画像で、Glypho Balanced は Intel Core i5-12600KF（CPU のみ）上で **0.7129 Det. H**、**0.5972 E2E H**、**172 ms p50**、**232 ms p95** を記録しました。
+
+| Engine | Det. H ↑ | E2E H ↑ | p50 ↓ | p95 ↓ |
+| --- | ---: | ---: | ---: | ---: |
+| **Glypho Balanced** | **0.7129** | **0.5972** | **172 ms** | **232 ms** |
+| ppu-paddle-ocr | 0.2025 | 0.0998 | 195 ms | 517 ms |
+| Tesseract 5 | 0.0697 | 0.0480 | 262 ms | 589 ms |
+| docTR | 0.5739 | 0.4107 | 728 ms | 1.08 s |
+| EasyOCR | 0.6061 | 0.2188 | 1.77 s | 2.02 s |
+| Surya Classic | 0.1687 | 0.1271 | 5.80 s | 14.33 s |
+
+さらに、**モデル容量を近づけた** Glypho と PPU の比較では、Tiny / Small / Medium の各ペアで Glypho が **p50 で 2.13×–2.65× 高速**、**E2E H-mean で 3.55×–7.73×** の値を記録しました。
+
+<sub>これは内部 SDK ベンチマークであり、公式 RRC leaderboard の結果ではありません。すべての engine で同じ dataset、machine、evaluator を使用しています。[方法と全結果 →](../docs/BENCHMARKS.md)</sub>
+
 Glypho はスクリーンショット、写真、UI テキストなど、**画像を外部 OCR API に送らずに高精度で読み取りたい場面**のために作られています。
 
 ネイティブエンジンは Rust 製で、PP-OCR モデルを ONNX Runtime 上で実行します。必要なモデルだけを取得し、SHA-256 で検証してローカルにキャッシュします。ウォームアップ済みの detector / recognizer session はメモリに保持されるため、2 回目以降の OCR で毎回初期化し直す必要はありません。
@@ -46,6 +64,22 @@ Glypho はスクリーンショット、写真、UI テキストなど、**画�
 ---
 
 ## 📦 インストール
+
+### CLI — 1 コマンド
+
+Linux / macOS:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rinqaku/Glypho/main/install.sh | sh
+```
+
+Windows PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/rinqaku/Glypho/main/install.ps1 | iex
+```
+
+インストーラーは最新の GitHub Release から環境に合う archive を取得し、SHA-256 を検証して `glypho` CLI をインストールします。配布済み build は Linux x64/ARM64、macOS ARM64、Windows x64/ARM64 に対応しています。
 
 ### Python
 
@@ -194,7 +228,7 @@ Glypho は release ごとに挙動が勝手に変わらないよう、固定さ�
 | Profile | Detector | Primary recognizer | 用途 |
 | --- | --- | --- | --- |
 | `fast` | PP-OCRv6 Tiny | PP-OCRv6 Tiny | 最低 latency / 軽量端末 |
-| `balanced` | PP-OCRv5 Mobile | PP-OCRv6 Small | 通常用途・既定値 |
+| `balanced` | PP-OCRv6 Small | PP-OCRv6 Small | 通常用途・既定値 |
 | `accurate` | PP-OCRv6 Small | PP-OCRv6 Small | 小さい文字・難しい画像 |
 | `maximum` | PP-OCRv6 Medium | PP-OCRv6 Medium | accuracy-first |
 
