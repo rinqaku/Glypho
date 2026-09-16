@@ -3,8 +3,24 @@ set -eu
 
 repository=${GLYPHO_GITHUB_REPOSITORY:-rinqaku/Glypho}
 version=${GLYPHO_VERSION:-latest}
-install_dir=${GLYPHO_INSTALL_DIR:-"$HOME/.local/bin"}
+install_dir=${GLYPHO_INSTALL_DIR:-}
 asset_dir=${GLYPHO_ASSET_DIR:-}
+
+if [ -z "$install_dir" ]; then
+  install_dir="$HOME/.local/bin"
+  existing=$(command -v glypho 2>/dev/null || true)
+  case "$existing" in
+    "$HOME"/*)
+      existing_dir=${existing%/*}
+      existing_version=$("$existing" --version 2>/dev/null || true)
+      # Keep an older user installation from shadowing the downloaded release.
+      if [ -d "$existing_dir" ] && [ -w "$existing_dir" ] && [ ! -L "$existing" ] &&
+        [ "${existing_version#glypho }" != "$existing_version" ]; then
+        install_dir=$existing_dir
+      fi
+      ;;
+  esac
+fi
 
 case "$(uname -s)" in
   Linux) platform=linux ;;
@@ -74,7 +90,18 @@ for source in "$temporary/glypho-ocr-$platform-$architecture"/bin/*; do
   install -m 0755 "$source" "$install_dir/$(basename "$source")"
 done
 
-printf 'Installed glypho to %s/glypho\n' "$install_dir"
+installed="$install_dir/glypho"
+installed_version=$("$installed" --version 2>/dev/null || true)
+if [ -n "$installed_version" ]; then
+  printf 'Installed %s to %s\n' "$installed_version" "$installed"
+else
+  printf 'Installed glypho to %s\n' "$installed"
+fi
+
+resolved=$(command -v glypho 2>/dev/null || true)
+if [ -n "$resolved" ] && [ "$resolved" != "$installed" ]; then
+  printf 'Warning: %s shadows the new installation at %s.\n' "$resolved" "$installed" >&2
+fi
 case ":$PATH:" in
   *":$install_dir:"*) ;;
   *) printf 'Add %s to PATH to run glypho from any directory.\n' "$install_dir" ;;
