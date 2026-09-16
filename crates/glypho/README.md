@@ -10,7 +10,7 @@ Local-first, ONNX Runtime powered, and built for screenshots, photos, UI text an
 [![GitHub](https://img.shields.io/badge/GitHub-rinqaku%2FGlypho-181717?style=flat-square&logo=github)](https://github.com/rinqaku/Glypho)
 [![License](https://img.shields.io/badge/license-Apache--2.0-4c8bf5?style=flat-square)](https://github.com/rinqaku/Glypho/blob/main/LICENSE)
 
-[🌐 **Try Glypho Web**](https://glypho.kaneki.cz) · [**GitHub**](https://github.com/rinqaku/Glypho)
+[🌐 **Try Glypho Web**](https://glypho.rinqaku.dev) · [**GitHub**](https://github.com/rinqaku/Glypho)
 
 </div>
 
@@ -132,5 +132,5 @@ The first run may download pinned model artifacts. They are verified before use 
 ---
 
 Full project: [github.com/rinqaku/Glypho](https://github.com/rinqaku/Glypho)<br>
-Web preview: [glypho.kaneki.cz](https://glypho.kaneki.cz)<br>
+Web preview: [glypho.rinqaku.dev](https://glypho.rinqaku.dev)<br>
 License: [Apache-2.0](https://github.com/rinqaku/Glypho/blob/main/LICENSE)

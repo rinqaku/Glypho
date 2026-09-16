@@ -4,7 +4,7 @@ build-backend = 'setuptools.build_meta'
 
 [project]
 name = 'glypho-ocr'
-version = '0.2.0'
+version = '0.2.1'
 description = 'Fast multilingual OCR for Python with a bundled native runtime'
 readme = 'README.md'
 requires-python = '>=3.10'
@@ -22,7 +22,7 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = 'https://glypho.kaneki.cz'
+Homepage = 'https://glypho.rinqaku.dev'
 Documentation = 'https://github.com/rinqaku/Glypho/blob/main/docs/PYTHON.md'
 Repository = 'https://github.com/rinqaku/Glypho'
 Issues = 'https://github.com/rinqaku/Glypho/issues'

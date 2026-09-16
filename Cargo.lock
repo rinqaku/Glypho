@@ -858,7 +858,7 @@ checksum = "21fef0953c54fd3de2f44b743fbf77e044c81a25faee03636dfccc0d35135e23"
 
 [[package]]
 name = "glypho-ocr"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "clap",
  "image",

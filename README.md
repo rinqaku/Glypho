@@ -24,7 +24,7 @@ Local by default, easy to embed, and available from Rust, Python, Node.js and th
 </p>
 
 <p align="center">
-  <a href="https://glypho.kaneki.cz"><strong>🌐 Try Glypho Web</strong></a>
+  <a href="https://glypho.rinqaku.dev"><strong>🌐 Try Glypho Web</strong></a>
 </p>
 
 ## 🏆 ICDAR 2015 CPU benchmark

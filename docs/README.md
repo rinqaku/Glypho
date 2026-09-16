@@ -2,7 +2,7 @@
 
 Short technical notes for things that are too detailed for the main README.
 
-🌐 **Web Preview:** https://glypho.kaneki.cz
+🌐 **Web Preview:** https://glypho.rinqaku.dev
 
 ## Guides
 

@@ -10,7 +10,7 @@ Local-first, Python 3.10+, and powered by the same Rust + ONNX Runtime engine as
 [![GitHub](https://img.shields.io/badge/GitHub-rinqaku%2FGlypho-181717?style=flat-square&logo=github)](https://github.com/rinqaku/Glypho)
 [![License](https://img.shields.io/badge/license-Apache--2.0-4c8bf5?style=flat-square)](https://github.com/rinqaku/Glypho/blob/main/LICENSE)
 
-[🌐 **Try Glypho Web**](https://glypho.kaneki.cz) · [**GitHub**](https://github.com/rinqaku/Glypho)
+[🌐 **Try Glypho Web**](https://glypho.rinqaku.dev) · [**GitHub**](https://github.com/rinqaku/Glypho)
 
 </div>
 
@@ -30,7 +30,7 @@ The package name is `glypho-ocr`; import it as `glypho`:
 from glypho import Glypho
 ```
 
-Prebuilt wheels for `0.2.0` are published for:
+Prebuilt wheels for `0.2.1` are published for:
 
 | OS | Architectures |
 | --- | --- |
@@ -38,7 +38,7 @@ Prebuilt wheels for `0.2.0` are published for:
 | macOS | Apple Silicon (ARM64) |
 | Windows | x64, ARM64 |
 
-Intel macOS is not included in the `0.2.0` prebuilt-wheel matrix. On targets without a matching wheel, `pip` may fall back to the source distribution, which requires Rust/Cargo and is not covered by the prebuilt release matrix.
+Intel macOS is not included in the `0.2.1` prebuilt-wheel matrix. On targets without a matching wheel, `pip` may fall back to the source distribution, which requires Rust/Cargo and is not covered by the prebuilt release matrix.
 
 ## 🚀 Quick start
 
@@ -187,7 +187,7 @@ auto | cpu | cuda | coreml | openvino
 
 Provider availability depends on the wheel, platform and host runtime. `device="auto"` probes available accelerators and falls back to CPU when necessary; `info()` exposes the resolved device and fallback information.
 
-The `0.2.0` release builds are CUDA-aware on Linux/Windows x64 and CoreML-aware on macOS Apple Silicon. CPU remains the fallback path.
+The `0.2.1` release builds are CUDA-aware on Linux/Windows x64 and CoreML-aware on macOS Apple Silicon. CPU remains the fallback path.
 
 ## 🧩 CLI
 
@@ -238,7 +238,7 @@ The only network access normally needed is the first model download. Once the re
 
 Python guide: [docs/PYTHON.md](https://github.com/rinqaku/Glypho/blob/main/docs/PYTHON.md)<br>
 Full project: [github.com/rinqaku/Glypho](https://github.com/rinqaku/Glypho)<br>
-Web preview: [glypho.kaneki.cz](https://glypho.kaneki.cz)<br>
+Web preview: [glypho.rinqaku.dev](https://glypho.rinqaku.dev)<br>
 Rust package: [crates.io/crates/glypho-ocr](https://crates.io/crates/glypho-ocr)<br>
 Node.js package: [npmjs.com/package/glypho-ocr](https://www.npmjs.com/package/glypho-ocr)<br>
 License: [Apache-2.0](https://github.com/rinqaku/Glypho/blob/main/LICENSE)

@@ -98,7 +98,7 @@ Glypho Web uses a separate browser runtime:
 - threaded WASM for broad compatibility and small models;
 - Web Worker inference so model initialization does not block React.
 
-Try it directly at **https://glypho.kaneki.cz**.
+Try it directly at **https://glypho.rinqaku.dev**.
 
 For local development:
 

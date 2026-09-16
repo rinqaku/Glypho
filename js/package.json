@@ -1,6 +1,6 @@
 {
   "name": "glypho-ocr",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Fast multilingual OCR for Node.js with a persistent native runtime",
   "keywords": [
     "ocr",
@@ -12,7 +12,7 @@
     "typescript"
   ],
   "license": "Apache-2.0",
-  "homepage": "https://glypho.kaneki.cz",
+  "homepage": "https://glypho.rinqaku.dev",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/rinqaku/Glypho.git",
@@ -35,11 +35,11 @@
     "glypho": "src/cli.js"
   },
   "optionalDependencies": {
-    "glypho-ocr-darwin-arm64": "0.2.0",
-    "glypho-ocr-linux-arm64": "0.2.0",
-    "glypho-ocr-linux-x64": "0.2.0",
-    "@rinqaku/glypho-ocr-win32-arm64": "0.2.0",
-    "@rinqaku/glypho-ocr-win32-x64": "0.2.0"
+    "glypho-ocr-darwin-arm64": "0.2.1",
+    "glypho-ocr-linux-arm64": "0.2.1",
+    "glypho-ocr-linux-x64": "0.2.1",
+    "@rinqaku/glypho-ocr-win32-arm64": "0.2.1",
+    "@rinqaku/glypho-ocr-win32-x64": "0.2.1"
   },
   "engines": {
     "node": ">=20"

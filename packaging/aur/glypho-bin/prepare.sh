@@ -3,7 +3,7 @@ set -euo pipefail
 
 version="${1:-}"
 if [[ -z "$version" ]]; then
-  echo "usage: $0 VERSION   (example: $0 0.2.0)" >&2
+  echo "usage: $0 VERSION   (example: $0 0.2.1)" >&2
   exit 2
 fi
 version="${version#v}"

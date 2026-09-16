@@ -24,7 +24,7 @@ Lokální ve výchozím nastavení, snadno vložitelné a dostupné z Rustu, Pyt
 </p>
 
 <p align="center">
-  <a href="https://glypho.kaneki.cz"><strong>🌐 Vyzkoušet Glypho Web</strong></a>
+  <a href="https://glypho.rinqaku.dev"><strong>🌐 Vyzkoušet Glypho Web</strong></a>
 </p>
 
 ## 🏆 ICDAR 2015 CPU benchmark

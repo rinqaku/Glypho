@@ -10,7 +10,7 @@ Local-first, TypeScript-friendly, and powered by the same native Glypho engine a
 [![GitHub](https://img.shields.io/badge/GitHub-rinqaku%2FGlypho-181717?style=flat-square&logo=github)](https://github.com/rinqaku/Glypho)
 [![License](https://img.shields.io/badge/license-Apache--2.0-4c8bf5?style=flat-square)](https://github.com/rinqaku/Glypho/blob/main/LICENSE)
 
-[🌐 **Try Glypho Web**](https://glypho.kaneki.cz) · [**GitHub**](https://github.com/rinqaku/Glypho)
+[🌐 **Try Glypho Web**](https://glypho.rinqaku.dev) · [**GitHub**](https://github.com/rinqaku/Glypho)
 
 </div>
 
@@ -34,7 +34,7 @@ Prebuilt runtime packages are available for:
 | macOS | Apple Silicon (ARM64) |
 | Windows | x64, ARM64 |
 
-npm selects the matching native package automatically. Windows native packages are published under the `@rinqaku` scope. Intel macOS is not included in the `0.2.0` prebuilt package matrix.
+npm selects the matching native package automatically. Windows native packages are published under the `@rinqaku` scope. Intel macOS is not included in the `0.2.1` prebuilt package matrix.
 
 ## 🚀 Quick start
 
@@ -176,6 +176,6 @@ The only network access normally needed is the first model download. Once the re
 ---
 
 Full project: [github.com/rinqaku/Glypho](https://github.com/rinqaku/Glypho)<br>
-Web preview: [glypho.kaneki.cz](https://glypho.kaneki.cz)<br>
+Web preview: [glypho.rinqaku.dev](https://glypho.rinqaku.dev)<br>
 Rust package: [crates.io/crates/glypho-ocr](https://crates.io/crates/glypho-ocr)<br>
 License: [Apache-2.0](https://github.com/rinqaku/Glypho/blob/main/LICENSE)

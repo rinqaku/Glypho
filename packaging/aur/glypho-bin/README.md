@@ -9,7 +9,7 @@ The package is intentionally named `glypho-bin`: the AUR package consumes upstre
 The GitHub Release must exist first because the PKGBUILD pins the SHA-256 of both Linux archives.
 
 ```bash
-./packaging/aur/glypho-bin/prepare.sh 0.2.0
+./packaging/aur/glypho-bin/prepare.sh 0.2.1
 cd packaging/aur/glypho-bin
 makepkg --cleanbuild
 ```
@@ -21,7 +21,7 @@ git clone ssh://aur@aur.archlinux.org/glypho-bin.git /tmp/glypho-bin-aur
 cp PKGBUILD .SRCINFO /tmp/glypho-bin-aur/
 cd /tmp/glypho-bin-aur
 git add PKGBUILD .SRCINFO
-git commit -m 'glypho-bin 0.2.0-1'
+git commit -m 'glypho-bin 0.2.1-1'
 git push
 ```
 

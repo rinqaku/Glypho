@@ -24,7 +24,7 @@
 </p>
 
 <p align="center">
-  <a href="https://glypho.kaneki.cz"><strong>🌐 Glypho Web を試す</strong></a>
+  <a href="https://glypho.rinqaku.dev"><strong>🌐 Glypho Web を試す</strong></a>
 </p>
 
 ## 🏆 ICDAR 2015 CPU ベンチマーク
