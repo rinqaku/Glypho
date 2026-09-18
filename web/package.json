@@ -11,9 +11,9 @@
     "test": "node test/core.test.mjs"
   },
   "dependencies": {
-    "framer-motion": "13.2.0",
-    "lucide-react": "1.44.0",
-    "onnxruntime-web": "1.29.0",
+    "framer-motion": "13.3.0",
+    "lucide-react": "1.46.0",
+    "onnxruntime-web": "1.30.0",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },
