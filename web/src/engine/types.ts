@@ -1,5 +1,7 @@
 import type { ModelName, Quality } from './models';
 
+export type ProgressSink = (event: ProgressEvent) => void;
+
 export interface Point { x: number; y: number }
 
 export interface Region {

@@ -104,3 +104,41 @@ test('terminates a stuck worker after timeout', { skip: process.platform === 'wi
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('retired worker events do not affect its replacement', { skip: process.platform === 'win32' }, async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'glypho-node-restart-'));
+  const binary = path.join(directory, 'worker.cjs');
+  const marker = path.join(directory, 'started');
+  await writeFile(binary, `#!/usr/bin/env node
+const fs = require('node:fs');
+const readline = require('node:readline');
+const retired = !fs.existsSync(${JSON.stringify(marker)});
+fs.writeFileSync(${JSON.stringify(marker)}, 'started');
+setInterval(() => {}, 1000);
+process.stdin.on('end', () => process.exit(0));
+if (retired) process.on('SIGTERM', () => {
+  process.stderr.write('retired worker stderr');
+  console.log('retired invalid JSON');
+  setTimeout(() => process.exit(0), 100);
+});
+readline.createInterface({ input: process.stdin }).on('line', (line) => {
+  const request = JSON.parse(line);
+  if (retired && request.method === 'warmup') return;
+  setTimeout(() => console.log(JSON.stringify({
+    id: request.id, ok: true, result: { runtime: retired ? 'initial' : 'replacement' },
+  })), retired ? 0 : 300);
+});
+`);
+  await chmod(binary, 0o700);
+  const glypho = new Glypho({ binary, timeoutMs: 5000 });
+  try {
+    assert.equal((await glypho.info()).runtime, 'initial');
+    await assert.rejects(glypho.warmup({ timeoutMs: 50 }), /timed out/);
+    assert.equal((await glypho.info()).runtime, 'replacement');
+    assert.equal(glypho.stderr, '');
+    assert.equal(glypho.pending.size, 0);
+  } finally {
+    await glypho.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});

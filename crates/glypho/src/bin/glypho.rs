@@ -582,7 +582,7 @@ fn paths_refer_to_same_file(left: &Path, right: &Path) -> io::Result<bool> {
     let right = match fs::canonicalize(right) {
         Ok(path) => path,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            let parent = right.parent().unwrap_or_else(|| Path::new("."));
+            let parent = output_parent(right);
             let parent = fs::canonicalize(parent)?;
             match right.file_name() {
                 Some(file_name) => parent.join(file_name),
@@ -664,7 +664,7 @@ fn write_bytes(bytes: &[u8], output: Option<&Path>) -> io::Result<()> {
 }
 
 fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let parent = output_parent(path);
     let file_name = path
         .file_name()
         .and_then(|name| name.to_str())
@@ -682,6 +682,12 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
         let _ = fs::remove_file(&temporary);
     }
     result
+}
+
+fn output_parent(path: &Path) -> &Path {
+    path.parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
 }
 
 fn create_temporary(parent: &Path, file_name: &str) -> io::Result<(PathBuf, fs::File)> {
@@ -723,6 +729,19 @@ fn replace_file(source: &Path, target: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn output_without_directory_uses_current_directory() {
+        assert_eq!(output_parent(Path::new("result.txt")), Path::new("."));
+        assert_eq!(output_parent(Path::new("./result.txt")), Path::new("."));
+        assert_eq!(
+            output_parent(Path::new("results/result.txt")),
+            Path::new("results")
+        );
+        let input = std::env::current_exe().unwrap();
+        let output = PathBuf::from(format!("glypho-unused-output-{}.json", std::process::id()));
+        assert!(!paths_refer_to_same_file(&input, &output).unwrap());
+    }
 
     #[test]
     fn rejects_input_as_output_before_writing() {

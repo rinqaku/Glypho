@@ -123,9 +123,9 @@ export class Glypho {
       const timer = setTimeout(() => {
         const error = new GlyphoError(`Glypho timed out after ${timeoutMs} ms`);
         finish(error);
-        this.stopWorker(error);
+        this.stopWorker(error, worker);
       }, timeoutMs);
-      this.pending.set(id, { finish, timer, abort });
+      this.pending.set(id, { finish, timer, abort, worker });
       options.signal?.addEventListener('abort', abort, { once: true });
       worker.stdin.write(`${JSON.stringify({ id, ...payload })}\n`, (error) => {
         if (error) {
@@ -155,30 +155,34 @@ export class Glypho {
     });
     this.worker = worker;
     this.stderr = '';
+    // Retired workers can still emit events after a replacement starts.
+    let stderr = '';
     worker.stderr.setEncoding('utf8');
     worker.stderr.on('data', (chunk) => {
-      this.stderr = `${this.stderr}${chunk}`.slice(-64 * 1024);
+      stderr = `${stderr}${chunk}`.slice(-64 * 1024);
+      if (this.worker === worker) this.stderr = stderr;
     });
-    createInterface({ input: worker.stdout }).on('line', (line) => this.handleResponse(line));
-    worker.once('error', (error) => this.failPending(new GlyphoError(error.message, { cause: error })));
+    createInterface({ input: worker.stdout }).on('line', (line) => this.handleResponse(line, worker));
+    worker.once('error', (error) => this.stopWorker(new GlyphoError(error.message, { cause: error }), worker));
     worker.once('exit', (code, signal) => {
-      const detail = this.stderr.trim();
+      if (this.worker === worker) this.worker = undefined;
+      const detail = stderr.trim();
       const suffix = detail || `worker exited with ${signal ?? code}`;
-      this.failPending(new GlyphoError(`Glypho worker stopped: ${suffix}`));
+      this.failPending(new GlyphoError(`Glypho worker stopped: ${suffix}`), worker);
     });
     return worker;
   }
 
-  handleResponse(line) {
+  handleResponse(line, worker = this.worker) {
     let response;
     try {
       response = JSON.parse(line);
     } catch (error) {
-      this.failPending(new GlyphoError('Glypho worker returned invalid JSON', { cause: error }));
+      this.failPending(new GlyphoError('Glypho worker returned invalid JSON', { cause: error }), worker);
       return;
     }
     const pending = this.pending.get(response.id);
-    if (!pending) {
+    if (!pending || pending.worker !== worker) {
       return;
     }
     if (response.ok) {
@@ -188,16 +192,15 @@ export class Glypho {
     }
   }
 
-  failPending(error) {
+  failPending(error, worker) {
     for (const pending of [...this.pending.values()]) {
-      pending.finish(error);
+      if (pending.worker === worker) pending.finish(error);
     }
   }
 
-  stopWorker(error) {
-    const worker = this.worker;
-    this.worker = undefined;
-    this.failPending(error);
+  stopWorker(error, worker = this.worker) {
+    if (this.worker === worker) this.worker = undefined;
+    this.failPending(error, worker);
     if (worker && worker.exitCode === null) {
       worker.kill();
     }

@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+
+import { testAssets } from './assets.test.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const temp = mkdtempSync(path.join(tmpdir(), 'glypho-web-test-'));
@@ -24,8 +26,14 @@ try {
     path.join(root, 'src', 'engine', 'types.ts'),
     path.join(root, 'src', 'engine', 'languages.ts'),
     path.join(root, 'src', 'engine', 'geometry.ts'),
+    path.join(root, 'src', 'engine', 'assets.ts'),
   ], { stdio: 'inherit' });
   writeFileSync(path.join(temp, 'package.json'), '{"type":"module"}\n');
+
+  const assetFile = path.join(temp, 'assets.js');
+  writeFileSync(assetFile, readFileSync(assetFile, 'utf8').replace(/from '(\.\/[^']+?)(?<!\.js)'/g, "from '$1.js'"));
+  const assets = await import(pathToFileURL(assetFile));
+  await testAssets(assets);
 
   const languages = await import(pathToFileURL(path.join(temp, 'languages.js')));
   const geometry = await import(pathToFileURL(path.join(temp, 'geometry.js')));
@@ -103,7 +111,7 @@ try {
   ]);
   assert.deepEqual(sorted.map((item) => item.id), ['a', 'b', 'c']);
 
-  console.log('Glypho Web core tests: 16 assertions passed.');
+  console.log('Glypho Web core and model cache tests passed.');
 } finally {
   rmSync(temp, { recursive: true, force: true });
 }

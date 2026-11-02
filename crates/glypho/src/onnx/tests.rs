@@ -230,6 +230,34 @@ fn adaptive_tiles_cover_long_images_with_overlap() {
 }
 
 #[test]
+fn tile_offsets_keep_overlap_at_exact_multiples() {
+    assert_eq!(tile_offsets(2_560, 1_280), vec![0, 640, 1_280]);
+    assert_eq!(tile_offsets(3_840, 1_280), vec![0, 853, 1_706, 2_560]);
+    assert_eq!(
+        tile_offsets(5_120, 1_280),
+        vec![0, 960, 1_920, 2_880, 3_840]
+    );
+}
+
+#[test]
+fn tile_offsets_cover_boundaries_without_gaps() {
+    for size in [2_u32, 8, 64, 960, 1_280, 1_600, 2_048] {
+        for length in 0..=size * 5 + 1 {
+            let offsets = tile_offsets(length, size);
+            assert_eq!(offsets[0], 0);
+            assert_eq!(*offsets.last().unwrap(), length.saturating_sub(size));
+            for pair in offsets.windows(2) {
+                assert!(pair[1] > pair[0]);
+                assert!(pair[1] - pair[0] <= size - (size / 8).max(1));
+                assert!(pair[1] + size <= length);
+            }
+        }
+    }
+    let offsets = tile_offsets(u32::MAX, u32::MAX / 2);
+    assert_eq!(*offsets.last().unwrap(), u32::MAX - u32::MAX / 2);
+}
+
+#[test]
 fn tiled_detection_deduplicates_overlap_without_merging_lines() {
     let boxes = deduplicate_boxes(vec![
         BoundingBox::from_coords(10.0, 10.0, 100.0, 30.0),

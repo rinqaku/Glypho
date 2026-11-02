@@ -15,7 +15,9 @@ pub(super) fn tile_offsets(length: u32, tile_size: u32) -> Vec<u32> {
         return vec![0];
     }
     let span = length - tile_size;
-    let intervals = span.div_ceil(tile_size).max(1);
+    // Keep at least 1/8 overlap, including exact multiples of the tile size.
+    let stride = tile_size.saturating_sub((tile_size / 8).max(1)).max(1);
+    let intervals = span.div_ceil(stride);
     (0..=intervals)
         .map(|index| ((u64::from(span) * u64::from(index)) / u64::from(intervals)) as u32)
         .collect()

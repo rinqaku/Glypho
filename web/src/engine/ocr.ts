@@ -9,12 +9,14 @@ import {
 } from './languages';
 import { distance, extractRegions, normalizeAngle, quadBounds, sortReadingOrder } from './geometry';
 import type { Candidate, OcrResult, ProgressEvent, Region } from './types';
+import { fetchArtifact } from './assets';
+
+export { fetchArtifact, readBounded } from './assets';
 
 const RECOGNITION_HEIGHT = 48;
 const BASE_RECOGNITION_WIDTH = 320;
 const MAX_RECOGNITION_WIDTH = 3200;
 const DEFAULT_MIN_CONFIDENCE = 0.80;
-const ARTIFACT_INFLIGHT = new Map<string, Promise<ArrayBuffer>>();
 
 type ProgressSink = (event: ProgressEvent) => void;
 type BrowserImage = ImageBitmap | OffscreenCanvas | HTMLImageElement;
@@ -350,122 +352,6 @@ function mainRecognizer(quality: Quality, plan: ReturnType<typeof recognizerPlan
   if (plan.cyrillic) return 'v5-eslav-rec';
   if (plan.korean) return 'v5-korean-rec';
   return primaryRecognizerFor(quality);
-}
-
-export async function fetchArtifact(
-  modelEntry,
-  name,
-  modelName: ModelName,
-  progress: ProgressSink = () => {},
-): Promise<ArrayBuffer> {
-  const artifact = modelEntry.artifacts?.[name] ?? modelEntry[name];
-  if (!artifact) throw new Error(`Model artifact is unavailable: ${name}`);
-  const existing = ARTIFACT_INFLIGHT.get(artifact.url);
-  if (existing) return existing;
-
-  const request = fetchArtifactInner(artifact, modelName, progress);
-  ARTIFACT_INFLIGHT.set(artifact.url, request);
-  try {
-    return await request;
-  } finally {
-    ARTIFACT_INFLIGHT.delete(artifact.url);
-  }
-}
-
-async function fetchArtifactInner(artifact, modelName: ModelName, progress: ProgressSink): Promise<ArrayBuffer> {
-  const cache = 'caches' in globalThis ? await caches.open('glypho-models-v3') : undefined;
-  const cached = await cache?.match(artifact.url);
-  if (cached) {
-    const bytes = await cached.arrayBuffer();
-    if (await verified(bytes, artifact)) {
-      progress({
-        phase: 'downloading', model: modelName, cached: true,
-        loadedBytes: artifact.bytes, totalBytes: artifact.bytes, progress: 1,
-        message: `${MODELS[modelName].shortLabel} · cached`,
-      });
-      return bytes;
-    }
-    await cache?.delete(artifact.url);
-  }
-
-  progress({
-    phase: 'downloading', model: modelName, loadedBytes: 0, totalBytes: artifact.bytes,
-    progress: 0, message: `Downloading ${MODELS[modelName].shortLabel}…`,
-  });
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 120_000);
-  let bytes: ArrayBuffer;
-  try {
-    const response = await fetch(artifact.url, {
-      mode: 'cors', credentials: 'omit', signal: controller.signal,
-    });
-    if (!response.ok) throw new Error(`Model download failed with HTTP ${response.status}`);
-    bytes = await readBounded(response, artifact.bytes, (loaded) => {
-      progress({
-        phase: 'downloading', model: modelName, loadedBytes: loaded, totalBytes: artifact.bytes,
-        progress: Math.min(1, loaded / artifact.bytes),
-        message: `Downloading ${MODELS[modelName].shortLabel}…`,
-      });
-    });
-  } finally {
-    clearTimeout(timeout);
-  }
-
-  if (!(await verified(bytes, artifact))) throw new Error('Downloaded model failed SHA-256 verification');
-  await cache?.put(artifact.url, new Response(bytes, { headers: { 'Content-Type': 'application/octet-stream' } }));
-  progress({
-    phase: 'downloading', model: modelName, cached: true,
-    loadedBytes: artifact.bytes, totalBytes: artifact.bytes, progress: 1,
-    message: `${MODELS[modelName].shortLabel} · verified`,
-  });
-  return bytes;
-}
-
-export async function readBounded(
-  response: Response,
-  expectedBytes: number,
-  onProgress: (loaded: number) => void = () => {},
-): Promise<ArrayBuffer> {
-  const contentLength = Number(response.headers.get('Content-Length'));
-  if (Number.isFinite(contentLength) && contentLength > 0 && contentLength !== expectedBytes) {
-    throw new Error('Model download has an unexpected size');
-  }
-  if (!response.body) {
-    const bytes = await response.arrayBuffer();
-    if (bytes.byteLength !== expectedBytes) throw new Error('Model download has an unexpected size');
-    onProgress(bytes.byteLength);
-    return bytes;
-  }
-
-  const reader = response.body.getReader();
-  const result = new Uint8Array(expectedBytes);
-  let offset = 0;
-  let lastReported = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (offset + value.byteLength > expectedBytes) {
-      await reader.cancel();
-      throw new Error('Model download exceeded its registered size');
-    }
-    result.set(value, offset);
-    offset += value.byteLength;
-    // Avoid flooding React with a progress event for every tiny network chunk.
-    if (offset - lastReported >= 256 * 1024 || offset === expectedBytes) {
-      onProgress(offset);
-      lastReported = offset;
-    }
-  }
-  if (offset !== expectedBytes) throw new Error('Model download has an unexpected size');
-  onProgress(offset);
-  return result.buffer;
-}
-
-async function verified(bytes: ArrayBuffer, artifact): Promise<boolean> {
-  if (bytes.byteLength !== artifact.bytes) return false;
-  const digest = await crypto.subtle.digest('SHA-256', bytes);
-  const hex = [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, '0')).join('');
-  return hex === artifact.sha256;
 }
 
 function configureWasm() {
